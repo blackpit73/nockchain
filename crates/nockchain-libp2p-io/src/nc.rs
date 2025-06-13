@@ -727,6 +727,7 @@ async fn handle_effect(
                 let mut tracker = message_tracker.lock().await;
                 let tx_id_str = tip5_hash_to_base58(tx_id.as_noun())
                     .expect("failed to convert tx ID to base58");
+                trace!("seen tx id: {:?}", &tx_id_str);
                 tracker.seen_txs.insert(tx_id_str);
             }
         }
@@ -2235,7 +2236,7 @@ fn log_dial_error(error: DialError) {
         DialError::DialPeerConditionFalse(_) => debug!("Dial peer condition false"),
         DialError::Transport(addr_errs) => {
             for (addr, error) in addr_errs {
-                warn!("Failed to dial address {}: {}", addr.to_string(), error);
+                trace!("Failed to dial address {}: {}", addr.to_string(), error);
             }
         }
     }

@@ -569,6 +569,23 @@
   ++  seed-path  ^-  trek
     (welp base-path /seed)
   ::
+  ++  set-receive-address
+    ^-  ^state
+    ?~  master.state
+      state
+    =/  master-coil=coil  (public:master master.state)
+    ?>  ?=(%pub -.key.master-coil)
+    =/  pubkey=schnorr-pubkey:transact
+      pub:(from-public:s10 [p.key cc]:master-coil)
+    =/  =lock:transact  (new:lock:transact pubkey)
+    state(receive-address lock)
+  ::
+  ++  assert-receive-address
+    ^-  lock:transact
+    ?:  =(receive-address.state *lock:transact)
+      ~|("receive-address not set - this is a bug" !!)
+    receive-address.state
+  ::
   ++  get
     |_  key-type=?(%pub %prv)
     ::
@@ -1002,6 +1019,7 @@
 ++  load
   |=  arg=^state
   ^-  ^state
+  =.  arg  set-receive-address:v
   arg
 ::
 ++  peek
@@ -1359,6 +1377,7 @@
     %-  (debug "import-master-pubkey: {<coil.cause>}")
     =/  master-pubkey-coil=coil  coil.cause
     =.  master.state  (some master-pubkey-coil)
+    =.  state  set-receive-address:v
     =/  label  `(crip "master-public-{<(end [3 4] p.key.master-pubkey-coil)>}")
     =.  keys.state  (key:put:v master-pubkey-coil ~ label)
     =/  key-b58=tape  (en:base58:wrap p.key.master-pubkey-coil)
@@ -1385,6 +1404,7 @@
     =/  master-pubkey-coil=coil  [%coil [%pub public-key] chain-code]:cor
     =/  master-privkey-coil=coil  [%coil [%prv private-key] chain-code]:cor
     =.  master.state  (some master-pubkey-coil)
+    =.  state  set-receive-address:v
     =/  public-label  `(crip "master-public-{<(end [3 4] public-key:cor)>}")
     =/  private-label  `(crip "master-private-{<(end [3 4] public-key:cor)>}")
     =.  keys.state  (key:put:v master-privkey-coil ~ private-label)
@@ -1403,6 +1423,7 @@
     =/  public-label  `(crip "master-public-{<(end [3 4] public-key:cor)>}")
     =/  private-label  `(crip "master-private-{<(end [3 4] public-key:cor)>}")
     =.  master.state  (some master-pubkey-coil)
+    =.  state  set-receive-address:v
     =.  keys.state  (key:put:v master-privkey-coil ~ private-label)
     =.  keys.state  (key:put:v master-pubkey-coil ~ public-label)
     %-  (debug "master.state: {<master.state>}")
@@ -1714,11 +1735,11 @@
         ::  we can subtract the fee from this note
         :_  %.y
         %-  with-choice:with-refund:simple-from-note:new:input:transact
-        [recipient gift fee note sender-key receive-address.state]
-      ::  ::  we cannot subtract the fee from this note, or we already have from a previous one
+       [recipient gift fee note sender-key assert-receive-address:v]
+      ::  we cannot subtract the fee from this note, or we already have from a previous one
       :_  %.n
       %-  with-choice:with-refund:simple-from-note:new:input:transact
-      [recipient gift 0 note sender-key receive-address.state]
+      [recipient gift 0 note sender-key assert-receive-address:v]
     ::
     ?.  spent-fee
       ~|("no note suitable to subtract fee from, aborting operation" !!)
@@ -1754,6 +1775,7 @@
     =/  master-public-coil  [%coil [%pub public-key] chain-code]:cor
     =/  master-private-coil  [%coil [%prv private-key] chain-code]:cor
     =.  master.state  (some master-public-coil)
+    =.  state  set-receive-address:v
     %-  (debug "keygen: public key: {<(en:base58:wrap public-key:cor)>}")
     %-  (debug "keygen: private key: {<(en:base58:wrap private-key:cor)>}")
     =/  pub-label  `(crip "master-public-{<(end [3 4] public-key:cor)>}")
