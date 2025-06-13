@@ -4,7 +4,6 @@ members = [
     "crates/kernels",
     "crates/hoonc",
     "crates/nockapp",
-    "crates/nockchain-bitcoin-sync",
     "crates/nockchain-libp2p-io",
     "crates/nockchain",
     "crates/nockvm/rust/ibig",
@@ -38,9 +37,6 @@ path = "crates/nockvm/rust/murmur3"
 
 [workspace.dependencies.nockchain]
 path = "crates/nockchain"
-
-[workspace.dependencies.nockchain-bitcoin-sync]
-path = "crates/nockchain-bitcoin-sync"
 
 [workspace.dependencies.nockchain-libp2p-io]
 path = "crates/nockchain-libp2p-io"

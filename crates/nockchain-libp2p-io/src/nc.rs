@@ -27,6 +27,7 @@ use nockapp::wire::{Wire, WireRepr};
 use nockapp::{AtomExt, NockAppError, NounExt};
 use nockvm::noun::{Atom, Noun, D, T};
 use nockvm_macros::tas;
+use rand::seq::SliceRandom;
 use serde_bytes::ByteBuf;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::{AbortHandle, JoinError, JoinSet};
@@ -2059,7 +2060,12 @@ fn dial_peers(
     swarm: &mut Swarm<NockchainBehaviour>,
     peers: &[Multiaddr],
 ) -> Result<(), NockAppError> {
-    for peer in peers {
+    let mut rng = rand::thread_rng();
+
+    let cloned_peers: &mut [libp2p::Multiaddr] = &mut peers.to_vec();
+    cloned_peers.shuffle(&mut rng);
+
+    for peer in cloned_peers {
         let peer = peer.clone();
         debug!("Dialing peer: {}", peer);
         let _ = swarm.dial(peer.clone()).map_err(log_dial_error);

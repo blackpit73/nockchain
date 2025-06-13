@@ -1019,7 +1019,7 @@
 ++  load
   |=  arg=^state
   ^-  ^state
-  =.  arg  set-receive-address:v
+  =.  arg  set-receive-address:~(. vault arg)
   arg
 ::
 ++  peek

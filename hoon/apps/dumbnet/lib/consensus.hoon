@@ -266,10 +266,15 @@
   ?.  =(height.pag +(height.par))
     [%.n %page-height-invalid]
   ::
-  ::  check if digest matches checkpointed history
-  ?.  ?|  ?!((~(has z-by checkpointed-digests) height.pag))
+  ::  check if digest matches checkpointed history, skip check if fakenet
+  ?~  genesis-seal.c
+    ~>  %slog.[0 leaf+"fatal: genesis seal not set!"]
+    [%.n %genesis-seal-not-set]
+  ?.  ?|  !=(realnet-genesis-msg:dk msg-hash.u.genesis-seal.c)
+          ?!((~(has z-by checkpointed-digests) height.pag))
           =(digest.pag (~(got z-by checkpointed-digests) height.pag))
       ==
+    ~&  %checkpoint-match-failed
     [%.n %checkpoint-match-failed]
   ::
   =/  check-heaviness=?

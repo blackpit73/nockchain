@@ -42,4 +42,19 @@
     u.highest-block-height.d
   =.  highest-block-height.d  `new-highest
   d
+::
+::  Any genesis-seal that does not contain the realnet genesis message is considered fake
+::  If the seal is not set, then we check the genesis block itself
+::  If there is no genesis block, we return ~
+++  is-mainnet
+  |=  c=consensus-state:dk
+  ^-  (unit ?)
+  ?~  genesis-seal.c
+    ?^  genesis-id=(~(get z-by heaviest-chain.d) 0)
+      =+  genesis=(~(get z-by blocks.c) u.genesis-id)
+      ?~  genesis
+        ~
+      `=((hash:page-msg:t msg.u.genesis) realnet-genesis-msg:dk)
+    ~
+  `=(realnet-genesis-msg:dk msg-hash.u.genesis-seal.c)
 --

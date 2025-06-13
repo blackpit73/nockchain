@@ -223,6 +223,11 @@ impl NounSlab {
         }
     }
 
+    /// Copy the root from another slab into this slab
+    pub fn copy_from_slab(&mut self, other: &NounSlab) {
+        self.copy_into(other.root);
+    }
+
     /// Copy a noun into this slab, only leaving references into the PMA. Set that noun as the root
     /// noun.
     pub fn copy_into(&mut self, copy_root: Noun) {

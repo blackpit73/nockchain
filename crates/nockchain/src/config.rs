@@ -1,8 +1,6 @@
-use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::{arg, command, value_parser, ArgAction, Parser};
-use nockchain_bitcoin_sync::BitcoinRPCConnection;
 
 use crate::mining::MiningKeyConfig;
 
@@ -62,26 +60,8 @@ pub struct NockchainCli {
         value_delimiter = ',',
     )]
     pub mining_key_adv: Option<Vec<MiningKeyConfig>>,
-    #[arg(long, help = "Watch for genesis block", default_value = "false")]
-    pub genesis_watcher: bool,
-    #[arg(long, help = "Mine genesis block", default_value = "false")]
-    pub genesis_leader: bool,
-    #[arg(long, help = "use fake genesis block", default_value = "false")]
+    #[arg(long, help = "Whether to run as fakenet", default_value_t = false)]
     pub fakenet: bool,
-    #[arg(long, help = "Genesis block message", default_value = "Hail Zorp")]
-    pub genesis_message: String,
-    #[arg(
-        long,
-        help = "URL for Bitcoin Core RPC",
-        default_value = "http://100.98.183.39:8332"
-    )]
-    pub btc_node_url: String,
-    #[arg(long, help = "Username for Bitcoin Core RPC")]
-    pub btc_username: Option<String>,
-    #[arg(long, help = "Password for Bitcoin Core RPC")]
-    pub btc_password: Option<String>,
-    #[arg(long, help = "Auth cookie path for Bitcoin Core RPC")]
-    pub btc_auth_cookie: Option<String>,
     #[arg(long, short, help = "Initial peer", action = ArgAction::Append)]
     pub peer: Vec<String>,
     #[arg(long, short, help = "Force peer", action = ArgAction::Append)]
@@ -130,56 +110,6 @@ impl NockchainCli {
             );
         }
 
-        if self.genesis_leader && self.genesis_watcher {
-            return Err(
-                "Cannot specify both genesis_leader and genesis_watcher at the same time"
-                    .to_string(),
-            );
-        }
-
-        if !self.fakenet && (self.genesis_watcher || self.genesis_leader) {
-            if self.btc_node_url.is_empty() {
-                return Err(
-                    "Must specify --btc-node-url when using genesis_watcher or genesis_leader"
-                        .to_string(),
-                );
-            }
-            if self.btc_auth_cookie.is_none() {
-                if self.btc_username.is_none() && self.btc_password.is_none() {
-                    return Err("Must specify either --btc-username or --btc-password when using genesis_watcher or genesis_leader on livenet".to_string());
-                }
-            }
-        }
-
         Ok(())
-    }
-
-    /// Helper function to create a BitcoinRPCConnection from CLI arguments
-    pub fn create_bitcoin_connection(&self) -> BitcoinRPCConnection {
-        let url = self.btc_node_url.clone();
-        let height = GENESIS_HEIGHT;
-        let auth = if let Some(username) = self.btc_username.clone() {
-            let password = self.btc_password.clone().unwrap_or_else(|| {
-                panic!(
-                    "Panicked at {}:{} (git sha: {:?})",
-                    file!(),
-                    line!(),
-                    option_env!("GIT_SHA")
-                )
-            });
-            bitcoincore_rpc::Auth::UserPass(username, password)
-        } else {
-            let cookie_path_str = self.btc_auth_cookie.clone().unwrap_or_else(|| {
-                panic!(
-                    "Panicked at {}:{} (git sha: {:?})",
-                    file!(),
-                    line!(),
-                    option_env!("GIT_SHA")
-                )
-            });
-            let cookie_path = PathBuf::from(cookie_path_str);
-            bitcoincore_rpc::Auth::CookieFile(cookie_path)
-        };
-        BitcoinRPCConnection::new(url, auth, height)
     }
 }

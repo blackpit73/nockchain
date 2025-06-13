@@ -25,6 +25,7 @@ use crate::noun::slab::NounSlab;
 
 use driver::{IOAction, IODriverFn, NockAppHandle, PokeResult};
 use metrics::*;
+use nockvm::noun::SIG;
 use wire::WireRepr;
 
 use futures::stream::StreamExt;
@@ -338,6 +339,28 @@ impl NockApp {
         Ok(res)
     }
 
+    // Peek at a noun in the kernel with result munging. A `~`, which denotes an invalid
+    // poke path results in an error while [~ ~] denoting missing data results in a Ok(None).
+    #[tracing::instrument(skip(self, path))]
+    pub async fn peek_handle(&mut self, path: NounSlab) -> Result<Option<NounSlab>, NockAppError> {
+        trace!("Peeking at noun: {:?}", path);
+        let res = self.kernel.peek(path).await?;
+        trace!("Peeked noun: {:?}", res);
+        if unsafe { res.root().raw_equals(&SIG) } {
+            return Err(NockAppError::PeekFailed);
+        }
+
+        let tail = unsafe { res.root().as_cell()?.tail() };
+        if unsafe { tail.raw_equals(&SIG) } {
+            Ok(None)
+        } else {
+            let res_noun = tail.as_cell()?.tail();
+            let mut slab = NounSlab::new();
+            slab.modify_noun(|_| res_noun);
+            Ok(Some(slab))
+        }
+    }
+
     /// Poke at a noun in the kernel, blocking operation
     #[tracing::instrument(skip(self, wire, cause))]
     pub fn poke_sync(
@@ -454,7 +477,7 @@ impl NockApp {
                                 Ok(NockAppRun::Done)
                             },
                             Err(e) => {
-                                error!("Shutdown triggered with error: {}", e);
+                                error!("Shutdown triggered with error: {:?}", e);
                                 Err(e)
                             }
                         }

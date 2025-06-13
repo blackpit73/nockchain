@@ -51,7 +51,7 @@
     m
   ?:  %+  gte  timestamp.candidate-block.m
       (time-in-secs:page:t (sub now update-candidate-timestamp-interval:t))
-    ::  has not been ~m2, so leave timestamp alone
+    ::  has not reached interval (default ~m2), so leave timestamp alone
     m
   =.  timestamp.candidate-block.m  (time-in-secs:page:t now)
   =/  print-var

@@ -107,7 +107,6 @@ sh ./scripts/run_nockchain_miner.sh
 
 For launch, make sure you run in a fresh working directory that does not include a .data.nockchain file from testing.
 
-
 ## FAQ
 
 ### Can I use same pubkey if running multiple miners?
@@ -129,6 +128,12 @@ To run multiple instances on the same machine, you need to:
 
 Here's how to set it up:
 
+First, make sure you have the most up-to-date version of Nockchain installed.
+
+```bash
+make install-nockchain
+```
+
 ```bash
 Inside of the nockchain directory:
 
@@ -143,6 +148,36 @@ cp .env node2/
 cd node1 && sh ../scripts/run_nockchain_miner.sh
 cd node2 && sh ../scripts/run_nockchain_miner.sh
 ```
+
+### How do I run a testnet?
+To run a testnet on your machine, follow the same instructions as above, except use the fakenet
+scripts provided in the `scripts` directory.
+
+Here's how to set it up:
+
+```bash
+Make sure you have the most up-to-date version of Nockchain installed.
+
+Inside of the nockchain directory:
+
+# Create directories for each instance
+mkdir fakenet-hub fakenet-node
+
+# Copy .env to each directory
+cp .env fakenet-hub/
+cp .env fakenet-node/
+
+# Run each instance in its own directory with .env loaded
+cd fakenet-hub && sh ../scripts/run_nockchain_node_fakenet.sh
+cd fakenet-node && sh ../scripts/run_nockchain_miner_fakenet.sh
+```
+
+The hub script is bound to a fixed multiaddr and the node script sets that multiaddr as an initial
+peer so that nodes have a way of discovering eachother initially.
+
+You can run multiple instances using `run_nockchain_miner_fakenet.sh`, just make sure that
+you are running them from different directories because the checkpoint data is located in the
+working directory of the script.
 
 ### What are the networking requirements?
 

@@ -83,11 +83,6 @@ build-hoon-all: nuke-assets update-hoonc ensure-dirs build-trivial $(HOON_TARGET
 build-hoon: ensure-dirs update-hoonc $(HOON_TARGETS)
 	$(call show_env_vars)
 
-.PHONY: run-nockchain
-run-nockchain:  # Run a nockchain node in follower mode with a mining pubkey
-	$(call show_env_vars)
-	mkdir -p miner-node && cd miner-node && rm -f nockchain.sock && RUST_BACKTRACE=1 cargo run --release --bin nockchain -- --npc-socket nockchain.sock --mining-pubkey $(MINING_PUBKEY) --mine
-
 HOON_SRCS := $(find hoon -type file -name '*.hoon')
 
 ## Build dumb.jam with hoonc

@@ -1,5 +1,6 @@
 pub mod config;
 pub mod mining;
+pub mod setup;
 
 use std::error::Error;
 use std::fs;
@@ -10,9 +11,8 @@ use libp2p::identity::Keypair;
 use libp2p::multiaddr::Multiaddr;
 use libp2p::{allow_block_list, connection_limits, memory_connection_limits, PeerId};
 use nockapp::kernel::boot;
-use nockapp::wire::Wire;
+use nockapp::utils::make_tas;
 use nockapp::NockApp;
-use nockchain_bitcoin_sync::{bitcoin_watcher_driver, GenesisNodeType};
 use termcolor::{ColorChoice, StandardStream};
 use tokio::net::UnixListener;
 pub mod colors;
@@ -20,7 +20,7 @@ pub mod colors;
 use colors::*;
 use nockapp::noun::slab::NounSlab;
 use nockvm::jets::hot::HotEntry;
-use nockvm::noun::{D, T};
+use nockvm::noun::{D, T, YES};
 use nockvm_macros::tas;
 use tracing::{debug, info, instrument};
 
@@ -31,18 +31,17 @@ pub mod driver_init {
     use nockapp::driver::{make_driver, IODriverFn, PokeResult};
     use nockapp::noun::slab::NounSlab;
     use nockapp::wire::{SystemWire, Wire};
-    use nockvm::noun::{D, T};
-    use nockvm_macros::tas;
+    use nockapp::NockAppError;
     use tokio::sync::oneshot;
-    use tracing::{debug, error, info};
+    use tracing::{debug, error, info, warn};
 
     /// A collection of initialization signals for drivers
     #[derive(Default)]
     pub struct DriverInitSignals {
         /// Sender for the born signal
-        pub born_tx: Option<oneshot::Sender<()>>,
+        pub signal_tx: Option<oneshot::Sender<()>>,
         /// Receiver for the born signal
-        pub born_rx: Option<oneshot::Receiver<()>>,
+        pub signal_rx: Option<oneshot::Receiver<()>>,
         /// Map of driver names to their initialization signal senders
         pub driver_signals: std::collections::HashMap<String, oneshot::Receiver<()>>,
     }
@@ -50,10 +49,10 @@ pub mod driver_init {
     impl DriverInitSignals {
         /// Create a new DriverInitSignals instance
         pub fn new() -> Self {
-            let (born_tx, born_rx) = oneshot::channel();
+            let (signal_tx, signal_rx) = oneshot::channel();
             Self {
-                born_tx: Some(born_tx),
-                born_rx: Some(born_rx),
+                signal_tx: Some(signal_tx),
+                signal_rx: Some(signal_rx),
                 driver_signals: std::collections::HashMap::new(),
             }
         }
@@ -71,8 +70,8 @@ pub mod driver_init {
         }
 
         /// Create a task that waits for all registered drivers to initialize
-        pub fn create_born_task(&mut self) -> tokio::task::JoinHandle<()> {
-            let born_tx = self.born_tx.take().expect("Born signal already used");
+        pub fn create_task(&mut self) -> tokio::task::JoinHandle<()> {
+            let signal_tx = self.signal_tx.take().expect("Signal already used");
             let driver_signals = std::mem::take(&mut self.driver_signals);
 
             tokio::spawn(async move {
@@ -92,33 +91,37 @@ pub mod driver_init {
                 }
 
                 // Send the born poke signal
-                let _ = born_tx.send(());
+                let _ = signal_tx.send(());
                 info!("all drivers initialized, born poke sent");
             })
         }
 
-        /// Create the born driver that waits for the born signal
-        pub fn create_born_driver(&mut self) -> IODriverFn {
-            let born_rx = self.born_rx.take().expect("born signal already used");
+        /// Create the born driver that waits for signal before poking
+        /// You can chain many of these together by passing 'init_complete_tx'.
+        pub fn create_driver(
+            &mut self,
+            poke: NounSlab,
+            init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
+        ) -> IODriverFn {
+            let born_rx = self.signal_rx.take().expect("born signal already used");
 
             make_driver(move |handle| {
                 Box::pin(async move {
                     // Wait for the born signal
                     let _ = born_rx.await;
 
-                    // Send the born poke
-                    let mut born_slab = NounSlab::new();
-                    let born = T(
-                        &mut born_slab,
-                        &[D(tas!(b"command")), D(tas!(b"born")), D(0)],
-                    );
-                    born_slab.set_root(born);
                     let wire = SystemWire.to_wire();
-                    let result = handle.poke(wire, born_slab).await?;
+                    let result = handle.poke(wire, poke).await?;
 
                     match result {
-                        PokeResult::Ack => debug!("born poke acknowledged"),
-                        PokeResult::Nack => error!("Born poke nacked"),
+                        PokeResult::Ack => debug!("poke acknowledged"),
+                        PokeResult::Nack => error!("poke nacked"),
+                    }
+                    if let Some(tx) = init_complete_tx {
+                        tx.send(()).map_err(|_| {
+                            warn!("Could not send driver initialization for mining driver.");
+                            NockAppError::OtherError
+                        })?;
                     }
 
                     Ok(())
@@ -337,60 +340,82 @@ pub async fn init_with_kernel(
 
     // Create driver initialization signals. the idea here is that we want to wait for
     // drivers that emit init pokes to complete before we send the born poke.
-    let mut driver_signals = driver_init::DriverInitSignals::new();
+    let mut born_driver_signals = driver_init::DriverInitSignals::new();
 
     // Register drivers that need initialization signals
-    let mining_init_tx = driver_signals.register_driver("mining");
-    let libp2p_init_tx = driver_signals.register_driver("libp2p");
-    let watcher_init_tx = driver_signals.register_driver("bitcoin_watcher");
+    let mining_init_tx = born_driver_signals.register_driver("mining");
+    let libp2p_init_tx = born_driver_signals.register_driver("libp2p");
 
     // Create the born task that waits for all drivers to initialize
-    let _born_task = driver_signals.create_born_task();
+    let _born_task = born_driver_signals.create_task();
 
-    if cli.as_ref().map(|c| c.fakenet).unwrap_or(false) {
-        let message = cli
-            .as_ref()
-            .map(|c| c.genesis_message.clone())
-            .unwrap_or("".to_string());
-        let node_type = if cli.as_ref().map(|c| c.genesis_leader).unwrap_or(false) {
-            GenesisNodeType::Leader
+    let is_kernel_mainnet: Option<bool> = {
+        let mut peek_slab = NounSlab::new();
+        let peek_noun = T(&mut peek_slab, &[D(tas!(b"mainnet")), D(0)]);
+        peek_slab.set_root(peek_noun);
+        if let Some(peek_res) = nockapp.peek_handle(peek_slab).await? {
+            let mainnet_flag = unsafe { peek_res.root() };
+            if mainnet_flag.is_atom() {
+                Some(unsafe { mainnet_flag.raw_equals(&YES) })
+            } else {
+                panic!("Invalid mainnet flag")
+            }
         } else {
-            GenesisNodeType::Watcher
-        };
-        let watcher_driver =
-            bitcoin_watcher_driver(None, node_type, message, Some(watcher_init_tx));
-        nockapp.add_io_driver(watcher_driver).await;
-    } else if cli
-        .as_ref()
-        .map(|c| c.genesis_watcher || c.genesis_leader)
-        .unwrap_or(false)
-    {
-        let message = cli
-            .as_ref()
-            .map(|c| c.genesis_message.clone())
-            .unwrap_or("".to_string());
-        let connection = cli.as_ref().unwrap().create_bitcoin_connection();
-        let node_type = if cli.as_ref().map(|c| c.genesis_leader).unwrap_or(false) {
-            GenesisNodeType::Leader
+            None
+        }
+    };
+
+    let genesis_seal_set: bool = {
+        let mut peek_slab = NounSlab::new();
+        let tag = make_tas(&mut peek_slab, "genesis-seal-set").as_noun();
+        let peek_noun = T(&mut peek_slab, &[tag, D(0)]);
+        peek_slab.set_root(peek_noun);
+        if let Some(peek_res) = nockapp.peek_handle(peek_slab).await? {
+            let genesis_seal = unsafe { peek_res.root() };
+            if genesis_seal.is_atom() {
+                unsafe { genesis_seal.raw_equals(&YES) }
+            } else {
+                panic!("Invalid genesis seal")
+            }
         } else {
-            GenesisNodeType::Watcher
-        };
-        let watcher_driver =
-            bitcoin_watcher_driver(Some(connection), node_type, message, Some(watcher_init_tx));
-        nockapp.add_io_driver(watcher_driver).await;
+            panic!("Genesis seal peak failed")
+        }
+    };
+
+    let born_init_tx = if cli.as_ref().map(|c| c.fakenet).unwrap_or(false) {
+        setup::poke(&mut nockapp, setup::SetupCommand::PokeFakenetConstants).await?;
+        if let Some(true) = is_kernel_mainnet {
+            panic!("Fatal: attemped to boot mainnet node with fakenet flag")
+        } else if !genesis_seal_set {
+            setup::poke(
+                &mut nockapp,
+                setup::SetupCommand::PokeSetGenesisSeal(setup::FAKENET_GENESIS_MESSAGE.to_string()),
+            )
+            .await?;
+        }
+
+        // Create driver initialization signals for fakenet
+        let mut fake_genesis_signals = driver_init::DriverInitSignals::new();
+        let born_init_tx = fake_genesis_signals.register_driver("born");
+        let _ = fake_genesis_signals.create_task();
+
+        let poke = setup::heard_fake_genesis_block()?;
+        let fakenet_driver = fake_genesis_signals.create_driver(poke, None);
+        nockapp.add_io_driver(fakenet_driver).await;
+        Some(born_init_tx)
     } else {
-        // Realnet with no BTC node
-        let mut poke_slab = NounSlab::new();
-        let poke_noun = T(
-            &mut poke_slab,
-            &[D(tas!(b"command")), D(tas!(b"btc-data")), D(0)],
-        );
-        poke_slab.set_root(poke_noun);
-        nockapp
-            .poke(nockapp::wire::SystemWire.to_wire(), poke_slab)
-            .await
-            .expect("Failed to poke for no BTC hash");
-    }
+        if let Some(false) = is_kernel_mainnet {
+            panic!("Fatal: attemped to boot fakenet kernel without fakenet flag!")
+        } else if !genesis_seal_set {
+            setup::poke(
+                &mut nockapp,
+                setup::SetupCommand::PokeSetGenesisSeal(setup::REALNET_GENESIS_MESSAGE.to_string()),
+            )
+            .await?;
+        }
+        None
+    };
+    setup::poke(&mut nockapp, setup::SetupCommand::PokeSetBtcData).await?;
 
     let mining_config = cli.as_ref().and_then(|c| {
         if let Some(pubkey) = &c.mining_pubkey {
@@ -427,7 +452,14 @@ pub async fn init_with_kernel(
     nockapp.add_io_driver(libp2p_driver).await;
 
     // Create the born driver that waits for the born signal
-    let born_driver = driver_signals.create_born_driver();
+    // Make the born poke
+    let mut born_slab = NounSlab::new();
+    let born = T(
+        &mut born_slab,
+        &[D(tas!(b"command")), D(tas!(b"born")), D(0)],
+    );
+    born_slab.set_root(born);
+    let born_driver = born_driver_signals.create_driver(born_slab, born_init_tx);
 
     // Add the born driver to the nockapp
     nockapp.add_io_driver(born_driver).await;

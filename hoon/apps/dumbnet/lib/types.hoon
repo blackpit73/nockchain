@@ -158,13 +158,13 @@
       %set-mining-key-advanced
       %enable-mining
       init-only-command
+      %set-genesis-seal
   ==
 ::  commands that can *only* be performed if init-phase is %.y
 +$  init-only-command
-  $?  %genesis
-      %set-genesis-seal
-      %btc-data
+  $?  %genesis 
       %set-constants
+      %btc-data
   ==
 ::
 +$  fact
@@ -260,4 +260,6 @@
 ::  $pok: kernel poke type
 ::
 +$  pok     [eny=@ our=@ux now=@da =cause]
+::
+++  realnet-genesis-msg  (from-b58:hash:dt '2c8Ltbg44dPkEGcNPupcVAtDgD87753M9pG2fg8yC2mTEqg5qAFvvbT')
 --

@@ -8,7 +8,7 @@ use nockapp::nockapp::wire::Wire;
 use nockapp::nockapp::NockAppError;
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::{AtomExt, NounExt};
-use nockvm::noun::{Atom, D, T};
+use nockvm::noun::{Atom, D, NO, T, YES};
 use nockvm_macros::tas;
 use tempfile::tempdir;
 use tracing::{instrument, warn};
@@ -259,7 +259,7 @@ async fn enable_mining(handle: &NockAppHandle, enable: bool) -> Result<PokeResul
         .expect("Failed to create enable-mining atom");
     let enable_mining_poke = T(
         &mut enable_mining_slab,
-        &[D(tas!(b"command")), enable_mining.as_noun(), D(if enable { 0 } else { 1 })],
+        &[D(tas!(b"command")), enable_mining.as_noun(), if enable { YES } else { NO }],
     );
     enable_mining_slab.set_root(enable_mining_poke);
     handle
