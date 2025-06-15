@@ -35,6 +35,7 @@
     ::
     ::  use this for production
     |=  arg=load-kernel-state:dk
+    ~&  [%nockchain-state-version -.arg]
     ::  cut
     |^
     ~>  %bout  (check-checkpoints (state-n-to-1 arg))
@@ -42,13 +43,20 @@
     ++  state-n-to-1
       |=  arg=load-kernel-state:dk
       ^-  kernel-state:dk
-      ?.  ?=(%1 -.arg)
+      ?.  ?=(%2 -.arg)
         ~>  %slog.[0 leaf+"state upgrade required"]
         ?-  -.arg
             ::
           %0  $(arg (state-0-to-1 arg))
+          %1  $(arg (state-1-to-2 arg))
         ==
       arg
+    ::  upgrade kernel-state-1 to kernel-state-2
+    ++  state-1-to-2
+      |=  arg=kernel-state-1:dk
+      ^-  kernel-state-2:dk
+      ~>  %slog.[0 leaf+"state version 0 to version 1"]
+      [%2 c.arg p.arg a.arg m.arg d.arg constants.arg]
     ::  upgrade kernel-state-0 to kernel-state-1
     ++  state-0-to-1
       |=  arg=kernel-state-0:dk
@@ -693,11 +701,13 @@
       ::  page is validated, update consensus and derived state
       =.  c.k  (add-page:con pag acc now)
       =/  print-var
+        ?>  ?=(^ pow.pag)
         %-  trip
         ^-  @t
         %+  rap  3
         :~  'block '  (to-b58:hash:t digest.pag)
             ' added to validated blocks at '  (scot %u height.pag)
+            ' with proof version '  (scot %u version.u.pow.pag)
         ==
       ~>  %slog.[0 %leaf^print-var]
       =/  effs=(list effect:dk)
@@ -889,8 +899,13 @@
           (do-mine nonce.command)
         ?.  =(nonce.command next-nonce.m.k)
           ~&  "mined wrong (old) nonce"
+          =/  version=proof-version:sp
+            (height-to-proof-version:con height.candidate-block.m.k)
           :_  k
-          [%mine pow-len:t commit next-nonce.m.k]~
+          ?-  version
+            %0  [%mine %0 commit next-nonce.m.k pow-len:t]~
+            %1  [%mine %1 commit next-nonce.m.k pow-len:t]~
+          ==
         ?:  %+  check-target:mine  dig.command
             (~(got z-by targets.c.k) parent.candidate-block.m.k)
           =.  m.k  (set-pow:min prf.command)
@@ -1046,7 +1061,7 @@
         =.  next-nonce.m.k  nonce
         ~&  mining-on+nonce
         :_  k
-        [%mine pow-len:t commit nonce]~
+        [%mine %0 commit nonce pow-len:t]~
       ::
       ::  only send a %elders request for reasonable heights
       ++  missing-parent-effects

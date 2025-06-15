@@ -10,6 +10,7 @@
   $+  load-kernel-state
   $%  kernel-state-0
       kernel-state-1
+      kernel-state-2
   ==
 ::
 +$  kernel-state-0
@@ -33,7 +34,17 @@
       d=derived-state-1
       constants=blockchain-constants:dt
   ==
-+$  kernel-state  kernel-state-1
++$  kernel-state-2
+  $:  %2
+      c=consensus-state-2
+      p=pending-state-2
+      a=admin-state-2
+      m=mining-state-2
+    ::
+      d=derived-state-2
+      constants=blockchain-constants:dt
+  ==
++$  kernel-state  kernel-state-2
 ::
 +$  consensus-state-0
   $+  consensus-state-0
@@ -60,7 +71,9 @@
 ::
 +$  consensus-state-1  $+(consensus-state-1 consensus-state-0)
 ::
-+$  consensus-state  consensus-state-1
++$  consensus-state-2  $+(consensus-state-2 consensus-state-1)
+::
++$  consensus-state  consensus-state-2
 ::
 ::  you will not have lost any chain state if you lost pending state, you'd just have to
 ::  request data again from peers
@@ -78,7 +91,9 @@
 ::
 +$  pending-state-1  $+(pending-state-1 pending-state-0)
 ::
-+$  pending-state  pending-state-1
++$  pending-state-2  $+(pending-state-2 pending-state-1)
+::
++$  pending-state  pending-state-2
 ::
 +$  admin-state-0
   $+  admin-state-0
@@ -91,7 +106,9 @@
 ::
 +$  admin-state-1  $+(admin-state-1 admin-state-0)
 ::
-+$  admin-state  admin-state-1
++$  admin-state-2  $+(admin-state-2 admin-state-1)
+::
++$  admin-state  admin-state-2
 ::
 +$  derived-state-0
   $+  derived-state-0
@@ -103,6 +120,8 @@
   $:  highest-block-height=(unit page-number:dt)
       heaviest-chain=(z-map page-number:dt block-id:dt)
   ==
+::
++$  derived-state-2  $+(derived-state-2 derived-state-1)
 ::
 +$  derived-state  derived-state-1
 ::
@@ -117,6 +136,8 @@
   ==
 ::
 +$  mining-state-1  $+(mining-state-1 mining-state-0)
+::
++$  mining-state-2  $+(mining-state-2 mining-state-1)
 ::
 +$  mining-state  mining-state-1
 ::
@@ -162,7 +183,7 @@
   ==
 ::  commands that can *only* be performed if init-phase is %.y
 +$  init-only-command
-  $?  %genesis 
+  $?  %genesis
       %set-constants
       %btc-data
   ==
@@ -183,7 +204,7 @@
       [%request p=request]  :: request specific tx or block
       [%track p=track]  :: runtime tracking of blocks for %liar-block-id effect
       [%seen p=seen]    ::  seen so don't reprocess
-      [%mine length=@ block-commitment=noun-digest:tip5:zeke nonce=noun-digest:tip5:zeke]
+      [%mine prover-input:sp]
       lie
       span-effect
       [%exit code=@]

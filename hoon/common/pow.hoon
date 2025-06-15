@@ -13,10 +13,13 @@
 ::
 ::  +prove-block-inner
 ++  prove-block-inner
-  |=  [length=@ block-commitment=noun-digest:tip5 nonce=noun-digest:tip5]
+  |=  prover-input:sp
   ^-  [proof:sp tip5-hash-atom]
   =/  =prove-result:sp
-    (prove:np block-commitment nonce length ~)
+    ?-  version
+      %0  (prove:np version header nonce pow-len)
+      %1  (prove:np version header nonce pow-len)
+    ==
   ?>  ?=(%& -.prove-result)
   =/  =proof:sp  p.prove-result
   =/  proof-hash=tip5-hash-atom  (proof-to-pow proof)

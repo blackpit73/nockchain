@@ -24,11 +24,19 @@
 ::
 +$  proof-objects  (list proof-data)
 ::
++$  proof-version  ?(%0 %1)
 +$  proof
-  $:  version=%0
-      objects=proof-objects
-      hashes=(list noun-digest:tip5)
-      read-index=@
+  $%  $:  version=%1
+          objects=proof-objects
+          hashes=(list noun-digest:tip5)
+          read-index=@
+      ==
+    ::
+      $:  version=%0
+          objects=proof-objects
+          hashes=(list noun-digest:tip5)
+          read-index=@
+      ==
   ==
 ::
 +$  tip5-hash-atom  @ux

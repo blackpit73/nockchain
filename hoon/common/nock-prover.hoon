@@ -21,6 +21,6 @@
   ==
 ::
 ++  prove
-  |=  [header=noun-digest:tip5 nonce=noun-digest:tip5 len=@ override=(unit (list term))]
-  (prove:prover header nonce len override)
+  |=  input=prover-input:stark-prover
+  (prove:prover input)
 --

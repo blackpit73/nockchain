@@ -12,42 +12,45 @@
     ==
 ~%  %stark-prover  ..stark-engine-jet-hook  ~
 |%
++$  prover-input 
+  $%  $:  version=%0 
+          header=noun-digest:tip5
+          nonce=noun-digest:tip5
+          pow-len=@
+      ==
+  ::
+      $:  version=%1
+          header=noun-digest:tip5
+          nonce=noun-digest:tip5
+          pow-len=@
+      ==
+  ==
+::
 +$  prove-result  (each =proof err=prove-err)
 +$  prove-err     $%([%too-big heights=(list @)])
 +$  prover-output    [=proof deep-codeword=fpoly]
+::
 ::  +prove: prove the Nock computation [s f]
-::
-::
-::    .override: an optional list of which tables should be computed and constraints
-::    checked. this is for debugging use only, it should always be ~ in production.
-::    to use it for debugging, pass in the same list of tables to both +prove
-::    and +verify. these are the tables that will be computed - all others will
-::    be ignored. you do not need to worry about sorting it in the correct order, that
-::    happens automatically.
 ++  prove
   ~/  %prove
-  |=  $:  header=noun-digest:tip5
-          nonce=noun-digest:tip5
-          pow-len=@
-          override=(unit (list term))
-      ==
+  |=  prover-input
   ^-  prove-result
   =/  [s=* f=*]  (puzzle-nock header nonce pow-len)
   =/  [prod=* return=fock-return]  (fink:fock [s f])
-  (generate-proof header nonce pow-len s f prod return override)
+  (generate-proof version header nonce pow-len s f prod return)
 ::
 :: generate-proof is the main body of the prover.
 ++  generate-proof
   :: Disabled jet hint for now, under development.
   :: ~/  %generate-proof
-  |=  $:  header=noun-digest:tip5
+  |=  $:  version=proof-version
+          header=noun-digest:tip5
           nonce=noun-digest:tip5
           pow-len=@
           s=*
           f=*
           prod=*
           return=fock-return
-          override=(unit (list term))
       ==
   ^-  prove-result
   =|  =proof  ::  the proof stream
@@ -56,7 +59,7 @@
   ::  build tables
   ::~&  %building-tables
   =/  tables=(list table-dat)
-    (build-table-dats return override)
+    (build-table-dats return)
   ::
   ::  check that the tables have correct base width. Comment this out for production.
   ::?:  %+  levy  tables
@@ -546,18 +549,19 @@
     m-pathbf+[(tail elem) path.opening]
   ::
   ::~&  %finished-proof
-  [%& %0 objects.proof ~ 0]
+  ?-  version
+    %0  [%& %0 objects.proof ~ 0]
+    %1  [%& %1 objects.proof ~ 0]
+  ==
 ::
 ::
 ++  build-table-dats
   ::~/  %build-table-dats
-  |=  [return=fock-return override=(unit (list term))]
+  |=  return=fock-return
   ^-  (list table-dat)
   %-  sort
   :_  td-order
-  %+  turn  ?~  override    :: check to see if we only want to use certain tables
-              gen-table-names:nock-common
-            u.override
+  %+  turn  gen-table-names:nock-common
   |=  name=term
   =/  t-funcs
     ~|  "table-funcs do not exist for {<name>}"

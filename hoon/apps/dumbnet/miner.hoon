@@ -8,7 +8,7 @@
   |%
   +$  effect  [%command %pow prf=proof:sp dig=tip5-hash-atom block-commitment=noun-digest:tip5 nonce=noun-digest:tip5]
   +$  kernel-state  [%state version=%1]
-  +$  cause  [length=@ block-commitment=noun-digest:tip5 nonce=noun-digest:tip5]
+  +$  cause  prover-input:sp
   --
 |%
 ++  moat  (keep kernel-state) :: no state
@@ -33,8 +33,9 @@
       `k
     =/  cause  u.cause
     :: XX TODO set up stark config, construct effect
-    =/  [prf=proof:sp dig=tip5-hash-atom]  (prove-block-inner:mine cause)
+    =/  [prf=proof:sp dig=tip5-hash-atom] 
+      (prove-block-inner:mine cause)
     :_  k
-    [%command %pow prf dig block-commitment.cause nonce.cause]~
+    [%command %pow prf dig header.cause nonce.cause]~
   --
 --
