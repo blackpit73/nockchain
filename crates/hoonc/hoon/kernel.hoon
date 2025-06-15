@@ -536,7 +536,7 @@
       =/  dep-hash  (shax dep-file)                     ::  hash dep file
       =^  dep-node=node  new-pc
         ?.  (is-hoon pax.i.deps)
-          :_  pc
+          :_  new-pc
           :*  pax.i.deps                                  ::  path
               dep-hash                                    ::  hash
               ~                                           ::  deps
