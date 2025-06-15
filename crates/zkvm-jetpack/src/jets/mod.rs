@@ -12,3 +12,4 @@ pub mod tip5_jets;
 pub mod utils;
 pub mod verifier_jets;
 pub mod fpntt_jets;
+pub mod tip5_sponge;
