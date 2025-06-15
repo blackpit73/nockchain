@@ -13,6 +13,7 @@ use crate::jets::memory_table_jets::*;
 use crate::jets::tip5_jets::*;
 use crate::jets::verifier_jets::*;
 use crate::jets::fpntt_jets::*;
+use crate::jets::tip5_sponge::*;
 
 pub fn produce_prover_hot_state() -> Vec<HotEntry> {
     let mut jets: Vec<HotEntry> = Vec::new();
@@ -462,36 +463,6 @@ pub const EXTENSION_FIELD_JETS: &[HotEntry] = &[
         1,
         fpow_jet,
     ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ext-field"),
-            Left(b"frep"),
-        ],
-        1,
-        frep_jet,
-    ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ext-field"),
-            Left(b"fp-ntt"),
-        ],
-        1,
-        fp_ntt_jet,
-    ),
 ];
 
 pub const BASE_FIELD_JETS: &[HotEntry] = &[
@@ -758,6 +729,24 @@ pub const ZTD_JETS: &[HotEntry] = &[
         ],
         1,
         hash_varlen_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"tip5-lib"),
+            Left(b"sponge"),
+            Left(b"absorb"),
+        ],
+        1,
+        sponge_absorb_jet,
     ),
 ];
 
