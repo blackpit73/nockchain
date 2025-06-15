@@ -3,7 +3,7 @@
 //   |_  sponge=tip5-state
 
 use bitvec::prelude::{BitSlice, Lsb0};
-use crate::form::tip5::STATE_SIZE;
+use crate::form::tip5::{permute, STATE_SIZE};
 use nockvm::interpreter::Context;
 use nockvm::jets::util::slot;
 use nockvm::jets::JetErr;
@@ -16,10 +16,12 @@ use crate::utils::{hoon_list_to_vecbelt, vec_to_hoon_list};
 // copied from interpreter.rs (fn edit)
 fn door_edit(
     stack: &mut NockStack,
-    edit_axis: &BitSlice<u64, Lsb0>,
+    edit_axis_path: u64,
     patch: Noun,
     mut tree: Noun,
 ) -> Noun {
+    let edit_axis = BitSlice::<u64, Lsb0>::from_element(&edit_axis_path);
+    
     let mut res = patch;
     let mut dest: *mut Noun = &mut res;
     let mut cursor = edit_axis
@@ -90,7 +92,7 @@ fn door_edit(
 pub fn sponge_absorb_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let input_noun = slot(subject, 6)?;
     let door = slot(subject, 7)?;
-    let mut sponge_noun = slot(door, 6)?;
+    let sponge_noun = slot(door, 6)?;
 
     let mut input_vec = hoon_list_to_vecbelt(input_noun)?;
     let mut sponge = hoon_list_to_sponge(sponge_noun)?;
@@ -108,37 +110,10 @@ pub fn sponge_absorb_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
     // process input in batches of size RATE
     tip5_absorb_input(&mut input_vec, &mut sponge, q);
 
-    // update sponge in door TODO
-    // see interpreter.rs, fn edit
-
-    // let mut i=0;
-    // let mut current = sponge_noun;
-    // while current.is_cell() {
-    //     let cell = current.as_cell()?;
-    //     let n = Atom::new(&mut context.stack, sponge[i]).as_noun();
-    //     let mut dest: *mut Noun = &mut cell.head();
-    //     unsafe { *dest = n; };
-    //     current = cell.tail();
-    //     i = i + 1;
-    // }
-    // assert_eq!(i,STATE_SIZE);
-    //Ok(NONE)
-
+    // update sponge in door
     let new_sponge = vec_to_hoon_list(context, &sponge);
-    // let xdoor = slot(subject, 7)?;
-    // let mut sponge_noun = &mut slot(door, 6)?;
-    // let x = &door.slot(6)?;
-    // //let mut dest: &Noun = x;
-    // unsafe { *sponge_noun = new_sponge; };
-    //
-    // let door = slot(subject, 7)?;
-    // let mut sponge_noun = slot(door, 6)?;
-    let edit_axis_path:u64 = 6;
-    let edit_axis = BitSlice::from_element(&edit_axis_path);
-    let edit = door_edit(&mut context.stack, edit_axis, new_sponge, door);
-
-    //Ok(new_sponge)
-    //Ok(NONE)
+    let edit = door_edit(&mut context.stack, 6, new_sponge, door);
+    
     Ok(edit)
 }
 
@@ -149,10 +124,16 @@ pub fn sponge_absorb_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
 //   ::
 pub fn sponge_permute_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let door = slot(subject, 7)?;
-    let sponge = slot(door, 6)?;
+    let sponge_noun = slot(door, 6)?;
+    let mut sponge = hoon_list_to_sponge(sponge_noun)?;
 
-    let sponge = [0u64; STATE_SIZE];
-    Ok(vec_to_hoon_list(context, &sponge))
+    permute(&mut sponge);
+
+    // update sponge in door
+    let new_sponge = vec_to_hoon_list(context, &sponge);
+    let edit = door_edit(&mut context.stack, 6, new_sponge, door);
+    
+    Ok(edit)
 }
 
 //   ++  squeeze
