@@ -1,19 +1,17 @@
 use nockvm::interpreter::Context;
-use nockvm::jets::list::util::lent;
 use nockvm::jets::util::slot;
 use nockvm::jets::JetErr;
-use nockvm::noun::{Atom, Cell, CellMemory, Noun, D, NONE, T};
+use nockvm::noun::{Noun, D, T};
 
 use crate::based;
 use crate::form::math::tip5::*;
 use crate::form::{Belt, Poly};
 use crate::jets::utils::jet_err;
 
+use crate::utils::{belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, vec_to_hoon_list};
 use bitvec::prelude::{BitSlice, Lsb0};
 use bitvec::view::BitView;
 use nockvm::mem::NockStack;
-use crate::hand::structs::HoonList;
-use crate::utils::{belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, vec_to_hoon_list, vecnoun_to_hoon_tuple};
 
 pub fn hoon_list_to_sponge(list: Noun) -> Result<[u64; STATE_SIZE], JetErr> {
     if list.is_atom() {
@@ -226,33 +224,6 @@ fn mont_reduction(x: u128) -> Belt {
 
     Belt(res as u64)
 }
-
-// // list-to-tuple: strips ~ from a list and yields a tuple
-// pub fn list_to_tuple_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-//     let sam = slot(subject, 6)?;
-//
-//     let mut lis: Vec<Noun> = Vec::<Noun>::new();
-//     HoonList::try_from(sam)?.for_each(|x| {lis.push(x);});
-//     Ok(vecnoun_to_hoon_tuple(context, lis.as_slice()))
-//
-//     //let mut lis: Vec<Noun> = Vec::<Noun>::new();
-//     //HoonList::try_from(sam)?.for_each(|x| {lis.push(x);});
-//     //let last_value = lis.last().unwrap();
-//
-//     // let mut cells: Vec<Cell> = Vec::<Cell>::new();
-//     // let mut list = sam;
-//     // while unsafe { !list.raw_equals(&D(0)) } {
-//     //     let input_cell = list.as_cell()?;
-//     //     cells.push(input_cell);
-//     //     list = input_cell.tail();
-//     // }
-//     //
-//     // let last_cell = cells.pop().unwrap();
-//     // let x = unsafe { cells.last().unwrap().to_raw_pointer_mut() };
-//
-//
-//     //Ok(NONE)
-// }
 
 pub fn hash_belts_list_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let input = slot(subject, 6)?;
