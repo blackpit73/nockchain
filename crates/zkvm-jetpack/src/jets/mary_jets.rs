@@ -1,5 +1,5 @@
 use nockvm::interpreter::Context;
-use nockvm::jets::util::{bite_to_word, chop, slot};
+use nockvm::jets::util::{bite_to_word, bits_to_word, chop, slot};
 use nockvm::jets::JetErr;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
 use nockvm::jets::list::util::{lent, reap};
@@ -7,7 +7,7 @@ use nockvm::jets::bits::util::{lsh, met};
 use nockvm::jets::math::util::add;
 use nockvm::mem::NockStack;
 use tracing::{debug,error};
-
+use nockvm::jets::bits::jet_xeb;
 use crate::form::Belt;
 use crate::form::mary::*;
 use crate::form::math::mary::*;
@@ -16,6 +16,7 @@ use crate::hand::handle::{finalize_mary, finalize_poly, new_handle_mut_mary, new
 use crate::hand::structs::HoonList;
 use crate::jets::base_jets::{levy_based, rip_correct};
 use crate::jets::bp_jets::init_bpoly;
+use crate::jets::shape_jets::leaf_sequence_jet;
 use crate::jets::tip5_jets::digest_to_noundigest;
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::AtomExt;
@@ -239,30 +240,90 @@ fn snag_as_bpoly(stack: &mut NockStack, mary_noun: Noun, i: usize) -> Result<Nou
 
 pub fn do_bp_build_merk_heap_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let stack = &mut context.stack;
-    let sam = slot(subject, 6)?;
-    let m = MarySlice::try_from(sam).expect("cannot convert m arg");
+    let mary_noun = slot(subject, 6)?;
 
-    // =/  heap-mary  (heapify-mary m)
-    let heap_mary : MarySlice = heapify_mary(m);
-    let xeb_m = met(0, u128_as_noun(stack, heap_mary.len as u128).as_atom()?); // TODO optimize
+    let m = MarySlice::try_from(mary_noun).expect("cannot convert m arg");
+    let heap_mary = heapify_mary(stack, m, mary_noun)?;
+    let xeb_m = simple_xeb(m.len as usize);
 
-    // build heap_mary_noun
-    let (res, heap_mary_mut): (IndirectAtom, MarySliceMut) =
-        new_handle_mut_mary(stack, heap_mary.step as usize, heap_mary.len as usize);
-    heap_mary_mut.dat.copy_from_slice(&heap_mary.dat);
-    let heap_mary_noun = finalize_mary(stack, heap_mary.step as usize, heap_mary.len as usize, res);
+    let snag_digest = snag_as_digest( stack, heap_mary, 0)?;
 
-    let snag_digest = snag_as_digest( stack, heap_mary_noun, 0)?;
-
-    let res1 = T(stack, &[ snag_digest, heap_mary_noun ]);
+    let res1 = T(stack, &[ snag_digest, heap_mary ]);
     let res = T(stack, &[ D(xeb_m as u64), res1]);
     Ok(res)
 }
 
-fn heapify_mary(m: MarySlice) -> MarySlice {
+fn simple_xeb(n : usize) -> usize {
+    if n == 0 {
+        0
+    } else {
+        (64 - n.leading_zeros()) as usize
+    }
+}
+
+fn heapify_mary(stack: &mut NockStack, m:MarySlice, m_noun: Noun ) -> Result<Noun, JetErr> {
     // |=  m=mary
     // ^-  mary
-    m // TODO
+
+    // =/  size  (dec (bex (xeb len.array.m)))
+    let size = simple_xeb(m.len as usize);
+
+    // calc high-bit
+    // =/  high-bit  (lsh [6 (mul size 5)] 1)
+    let high_bit = lsh(stack, 6, size*5, D(1).as_atom()?)?.as_atom()?;
+    // let step = size * 5;
+    // let a = D(1).as_atom().unwrap();
+    // let len = 1;
+    // let au64 = 1u64;
+    // let abitsize = (64 - au64.leading_zeros()) as usize;
+    // let new_size = bits_to_word(abitsize + (6<<step))?;
+    // let (mut atom, dest) = IndirectAtom::new_raw_mut_bitslice(stack, new_size);
+    // unsafe { chop(6, 0, len, step, dest, a.as_bitslice())?; }
+    // let high_bit = atom.as_u64()?;
+
+    // make leaves
+
+    // =/  res=(list (list @))
+    //   %+  turn
+    //     (range len.array.m)
+    //   |=  i=@
+    //   =/  t  (~(snag-as-bpoly ave m) i)
+    //   (leaf-sequence:shape (hash-hashable:tip5 (hashable-bpoly:tip5 t)))
+
+    let mut res:Vec<Noun> = Vec::new();
+    for i in 0 .. m.len+1 {
+        let t=snag_as_bpoly(stack, m_noun, i as usize)?;
+
+
+
+        res.push(t);
+    }
+
+
+
+    // :+  5
+    //   size
+    // %+  add
+    //   high-bit
+    // %+  rep  6
+    // %-  zing
+    // ^-  (list (list @))
+    // =/  curr  res
+    //
+    //
+    // |-
+    // ?:  =((lent curr) 1)
+    //   res
+    // ~&  %do-bp-build-merk-heap-heapify-mary-pairs
+    // =/  pairs  (hash-pairs:tip5 curr)
+    // %=  $
+    //   res      (weld pairs res)
+    //   curr     pairs
+    // ==
+
+
+
+    jet_err()
 }
 
 

@@ -1,8 +1,10 @@
+use crate::utils::vec_to_hoon_list;
 use nockvm::interpreter::Context;
-use nockvm::jets::JetErr;
+use nockvm::jets::list::util::flop;
 use nockvm::jets::util::slot;
-use nockvm::noun::Noun;
-use crate::utils::{vec_to_hoon_list};
+use nockvm::jets::JetErr;
+use nockvm::mem::NockStack;
+use nockvm::noun::{Noun, D, T};
 
 pub fn leaf_sequence_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let t = slot(subject, 6)?;
@@ -24,7 +26,28 @@ pub fn do_leaf_sequence(noun: Noun, vec: &mut Vec<u64>) -> Result<(), JetErr> {
     }
 }
 
+pub fn dyck_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let t = slot(subject, 6)?;
 
+    let vec=dyck(stack, t, D(0))?;
+    flop(stack, vec)
+}
+
+fn dyck(stack: &mut NockStack, t: Noun, vec:Noun) -> Result<Noun,JetErr> {
+
+    if t.is_atom() {
+        Ok(vec)
+    } else {
+        let t_cell = t.as_cell()?;
+        
+        let vec_inner = T(stack, &[D(0), vec]);
+        let dyck_inner = dyck(stack, t_cell.head(), vec_inner)?;
+
+        let vec_outer = T(stack, &[D(1), dyck_inner]);
+        dyck(stack, t_cell.tail(), vec_outer)
+    }
+}
 
 #[cfg(test)]
 mod tests {
