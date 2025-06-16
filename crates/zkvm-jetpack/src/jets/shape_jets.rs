@@ -12,7 +12,7 @@ pub fn leaf_sequence_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
     Ok(vec_to_hoon_list(&mut context.stack, &leaf))
 }
 
-fn do_leaf_sequence(noun: Noun, vec: &mut Vec<u64>) -> Result<(), JetErr> {
+pub fn do_leaf_sequence(noun: Noun, vec: &mut Vec<u64>) -> Result<(), JetErr> {
     if noun.is_atom() {
         vec.push(noun.as_atom()?.as_u64()?);
         Ok(())

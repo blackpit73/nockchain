@@ -8,6 +8,7 @@ use crate::form::math::tip5::*;
 use crate::form::{Belt, Poly};
 use crate::jets::utils::jet_err;
 
+use crate::jets::shape_jets::do_leaf_sequence;
 use crate::utils::{belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, hoon_list_to_vecnoun, vec_to_hoon_list, vecnoun_to_hoon_list};
 use bitvec::prelude::{BitSlice, Lsb0};
 use bitvec::view::BitView;
@@ -285,26 +286,7 @@ fn hash_10(mut input_vec: &mut Vec<Belt>) -> [u64; 5] {
     tip5_calc_digest(&sponge)
 }
 
-// ++  hash-pairs
-//   ~/  %hash-pairs
-//   |=  lis=(list (list @))
-//   ^-  (list (list @))
-//   |^ :: Produce a core whose battery includes a $ arm and compute the latter.
-//   %+  turn
-//     (indices (lent lis))
-//   |=  b=@
-//   ?:  =(+(b) (lent lis))
-//     (snag b lis)
-//   (hash-10:tip5 (weld (snag b lis) (snag +(b) lis)))
-//
-//   ++  indices :: 8 => [0 [2 [4 [6 ~]]]]
-//     |=  n=@
-//     ^-  (list @)
-//     ?<  =(n 0)  :: assert(n!=0)
-//     =/  i  0
-//     |-
-//     ?:  (gte i n)  ~
-//     [i $(i (add 2 i))]
+
 pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let stack = &mut context.stack;
     let lis_noun = slot(subject, 6)?; // (list (list @))
@@ -332,6 +314,23 @@ pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetE
     Ok(vecnoun_to_hoon_list(stack, res.as_slice()))
 }
 
+
+pub fn hash_ten_cell_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let ten_cell = slot(subject, 6)?; // [noun-digest noun-digest]
+
+    //   |=  =ten-cell  :: [noun-digest noun-digest]
+    //   ^-  noun-digest    :: [belt belt belt belt belt]
+    
+    // leaf_sequence(ten-cell)
+    let mut leaf: Vec<u64> = Vec::<u64>::new();
+    do_leaf_sequence(ten_cell, &mut leaf)?;
+    let mut leaf_belt = leaf.into_iter().map(|x| Belt(x)).collect();
+
+    // list-to-tuple hash10
+    let digest = hash_10(&mut leaf_belt);
+    Ok(digest_to_noundigest(stack, digest))
+}
 
 
 #[cfg(test)]
