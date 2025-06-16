@@ -1,17 +1,18 @@
 use nockvm::interpreter::Context;
 use nockvm::jets::util::slot;
 use nockvm::jets::JetErr;
-use nockvm::noun::{Noun, T};
+use nockvm::noun::{Noun, D, T};
 
 use crate::based;
 use crate::form::math::tip5::*;
 use crate::form::{Belt, Poly};
 use crate::jets::utils::jet_err;
 
-use crate::jets::shape_jets::do_leaf_sequence;
+use crate::jets::shape_jets::{do_leaf_sequence, dyck, leaf_sequence};
 use crate::utils::{belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, hoon_list_to_vecnoun, vec_to_hoon_list, vecnoun_to_hoon_list};
 use bitvec::prelude::{BitSlice, Lsb0};
 use bitvec::view::BitView;
+use nockvm::jets::list::util::{lent, weld};
 use nockvm::mem::NockStack;
 
 pub fn hoon_list_to_sponge(list: Noun) -> Result<[u64; STATE_SIZE], JetErr> {
@@ -236,11 +237,15 @@ pub fn mont_reduction(x: u128) -> Belt {
 }
 
 pub fn hash_belts_list_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
     let input = slot(subject, 6)?;
-    let mut input_vec = hoon_list_to_vecbelt(input)?;
+    hash_belts_list(stack, input)
+}
 
+pub fn hash_belts_list(stack: &mut NockStack, input: Noun) -> Result<Noun, JetErr> {
+    let mut input_vec = hoon_list_to_vecbelt(input)?;
     let digest = hash_varlen(&mut input_vec);
-    Ok(digest_to_noundigest(&mut context.stack, digest))
+    Ok(digest_to_noundigest(stack, digest))
 }
 
 pub fn digest_to_noundigest(stack: &mut NockStack, digest: [u64; 5]) -> Noun {
@@ -331,6 +336,32 @@ pub fn hash_ten_cell_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
     let digest = hash_10(&mut leaf_belt);
     Ok(digest_to_noundigest(stack, digest))
 }
+
+
+
+// ++  hash-noun-varlen
+//   ~/  %hash-noun-varlen
+//   |=  n=*
+//   ^-  noun-digest
+//   =/  leaf=(list @)  (leaf-sequence:shape n)
+//   =/  dyck=(list @)  (dyck:shape n)
+//   =/  size  (lent leaf)
+//   (hash-belts-list [size (weld leaf dyck)])
+pub fn hash_noun_varlen_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let n = slot(subject, 6)?;
+
+    let leaf = leaf_sequence(stack, n)?;
+    let dyck = dyck(stack, n)?;
+    let size = lent(leaf).map(|x| D(x as u64))?;
+
+    // [size (weld leaf dyck)]
+    let weld = weld(stack, leaf, dyck)?;
+    let arg = T( stack,&[ size, weld]);
+
+    hash_belts_list(stack, arg)
+}
+
 
 
 
