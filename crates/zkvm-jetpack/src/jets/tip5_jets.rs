@@ -301,29 +301,33 @@ pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetE
     let stack = &mut context.stack;
     let lis_noun = slot(subject, 6)?; // (list (list @))
 
+    hash_pairs(stack, lis_noun)
+}
+
+pub fn hash_pairs(stack: &mut NockStack, lis_noun: Noun) -> Result<Noun, JetErr> {
     let lis = hoon_list_to_vecnoun(lis_noun)?;
-    let lent_lis = lis.len(); assert!(lent_lis>0);
+    let lent_lis = lis.len();
+    assert!(lent_lis > 0);
 
     let mut res: Vec<Noun> = Vec::new();
 
-    for i in 0 .. lent_lis/2 {
-        let b = i*2;
-        if (b+1)==lent_lis {
+    for i in 0..lent_lis / 2 {
+        let b = i * 2;
+        if (b + 1) == lent_lis {
             res.push(lis[b]);
         } else {
             let b0 = hoon_list_to_vecbelt(lis[b])?;
-            let mut b1 = hoon_list_to_vecbelt(lis[b+1])?;
+            let mut b1 = hoon_list_to_vecbelt(lis[b + 1])?;
             let mut pair = b0;
             pair.append(&mut b1);
             let digest = hash_10(&mut pair);
-            let digest_noun=vec_to_hoon_list(stack, &digest);
+            let digest_noun = vec_to_hoon_list(stack, &digest);
             res.push(digest_noun);
         }
     }
 
     Ok(vecnoun_to_hoon_list(stack, res.as_slice()))
 }
-
 
 pub fn hash_ten_cell_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let stack = &mut context.stack;
@@ -367,7 +371,7 @@ pub fn hash_hashable_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
     hash_hashable(stack, h)
 }
 
-fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result<Noun, JetErr> {
+pub fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result<Noun, JetErr> {
     if !h.is_cell() {
         return jet_err()
     }

@@ -2,11 +2,13 @@ use nockvm::interpreter::Context;
 use nockvm::jets::util::{bite_to_word, chop, slot};
 use nockvm::jets::JetErr;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
-use nockvm::jets::list::util::{lent, reap};
+use nockvm::jets::list::util::{lent, reap, weld, zing};
 use nockvm::jets::bits::util::{lsh};
 use nockvm::jets::math::util::add;
 use nockvm::mem::NockStack;
 use tracing::{debug,error};
+use nockvm::jets::bits::rep;
+use nockvm_macros::tas;
 use crate::form::Belt;
 use crate::form::mary::*;
 use crate::form::math::mary::*;
@@ -15,9 +17,11 @@ use crate::hand::handle::{finalize_mary, finalize_poly, new_handle_mut_mary, new
 use crate::hand::structs::HoonList;
 use crate::jets::base_jets::{levy_based, rip_correct};
 use crate::jets::bp_jets::init_bpoly;
-use crate::jets::tip5_jets::digest_to_noundigest;
+use crate::jets::shape_jets::leaf_sequence;
+use crate::jets::tip5_jets::{digest_to_noundigest, hash_hashable, hash_pairs};
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::{AtomExt, NounExt};
+use crate::utils::vecnoun_to_hoon_list;
 
 pub fn mary_swag_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let door = slot(subject, 7)?;
@@ -233,121 +237,6 @@ fn snag_as_bpoly(stack: &mut NockStack, mary_noun: Noun, i: usize) -> Result<Nou
 }
 
 
-
-
-pub fn do_bp_build_merk_heap_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-    let stack = &mut context.stack;
-    let mary_noun = slot(subject, 6)?;
-
-    let m = MarySlice::try_from(mary_noun).expect("cannot convert m arg");
-    let heap_mary = heapify_mary(stack, m, mary_noun)?;
-    let xeb_m = simple_xeb(m.len as usize);
-
-    let snag_digest = snag_as_digest( stack, heap_mary, 0)?;
-
-    let res1 = T(stack, &[ snag_digest, heap_mary ]);
-    let res = T(stack, &[ D(xeb_m as u64), res1]);
-    Ok(res)
-}
-
-fn simple_xeb(n : usize) -> usize {
-    if n == 0 {
-        0
-    } else {
-        (64 - n.leading_zeros()) as usize
-    }
-}
-
-fn heapify_mary(stack: &mut NockStack, m:MarySlice, m_noun: Noun ) -> Result<Noun, JetErr> {
-    // |=  m=mary
-    // ^-  mary
-
-    // =/  size  (dec (bex (xeb len.array.m)))
-    let size = simple_xeb(m.len as usize);
-
-    // calc high-bit
-    // =/  high-bit  (lsh [6 (mul size 5)] 1)
-    let high_bit = lsh(stack, 6, size*5, D(1).as_atom()?)?.as_atom()?;
-    // let step = size * 5;
-    // let a = D(1).as_atom().unwrap();
-    // let len = 1;
-    // let au64 = 1u64;
-    // let abitsize = (64 - au64.leading_zeros()) as usize;
-    // let new_size = bits_to_word(abitsize + (6<<step))?;
-    // let (mut atom, dest) = IndirectAtom::new_raw_mut_bitslice(stack, new_size);
-    // unsafe { chop(6, 0, len, step, dest, a.as_bitslice())?; }
-    // let high_bit = atom.as_u64()?;
-
-    // make leaves
-
-    // =/  res=(list (list @))
-    //   %+  turn
-    //     (range len.array.m)
-    //   |=  i=@
-    //   =/  t  (~(snag-as-bpoly ave m) i)
-    //   (leaf-sequence:shape (hash-hashable:tip5 (hashable-bpoly:tip5 t)))
-
-    let mut res:Vec<Noun> = Vec::new();
-    for i in 0 .. m.len+1 {
-        let t=snag_as_bpoly(stack, m_noun, i as usize)?;
-
-
-
-        res.push(t);
-    }
-
-
-
-    // :+  5
-    //   size
-    // %+  add
-    //   high-bit
-    // %+  rep  6
-    // %-  zing
-    // ^-  (list (list @))
-    // =/  curr  res
-    //
-    //
-    // |-
-    // ?:  =((lent curr) 1)
-    //   res
-    // ~&  %do-bp-build-merk-heap-heapify-mary-pairs
-    // =/  pairs  (hash-pairs:tip5 curr)
-    // %=  $
-    //   res      (weld pairs res)
-    //   curr     pairs
-    // ==
-
-
-
-    jet_err()
-}
-
-
-pub fn snag_as_digest_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-    let stack = &mut context.stack;
-    let sam = slot(subject, 6)?;
-    let m_noun = slot(sam, 2)?;
-    let i_noun = slot(sam, 3)?;
-
-    let i = i_noun.as_atom()?.as_u64()? as usize;
-    snag_as_digest( stack, m_noun, i)
-}
-
-fn snag_as_digest(stack: &mut NockStack, m_noun: Noun, i: usize) -> Result<Noun, JetErr>{
-    let buf = snag_one(stack, m_noun, i)?.as_atom()?;
-
-    let mut digest = [0u64; DIGEST_LENGTH];
-    digest[0] = cut(stack, 6, 0, 1, buf)?.as_atom()?.as_u64()?;
-    digest[1] = cut(stack, 6, 1, 1, buf)?.as_atom()?.as_u64()?;
-    digest[2] = cut(stack, 6, 2, 1, buf)?.as_atom()?.as_u64()?;
-    digest[3] = cut(stack, 6, 3, 1, buf)?.as_atom()?.as_u64()?;
-    digest[4] = cut(stack, 6, 4, 1, buf)?.as_atom()?.as_u64()?;
-
-    Ok(digest_to_noundigest(stack, digest))
-}
-
-
 pub fn change_step_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let stack = &mut context.stack;
     let door = slot(subject, 7)?;
@@ -374,5 +263,91 @@ pub fn change_step(stack: &mut NockStack, ma_noun: Noun, new_step_noun: Noun) ->
     let res1 = D((ma_step * array_len) / new_step);
     let res = T(stack, &[new_step_noun, res1, array_dat]);
     Ok(res)
+}
+
+
+
+pub fn bp_build_merk_heap_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let mary_noun = slot(subject, 6)?;
+
+    let m = MarySlice::try_from(mary_noun).expect("cannot convert m arg");
+    let heap_mary = heapify_mary(stack, m, mary_noun)?;
+    let xeb_m = simple_xeb(m.len as usize);
+
+    let snag_digest = snag_as_digest( stack, heap_mary, 0)?;
+
+    let res1 = T(stack, &[ snag_digest, heap_mary ]);
+    let res = T(stack, &[ D(xeb_m as u64), res1]);
+    Ok(res)
+}
+
+fn simple_xeb(n : usize) -> usize {
+    if n == 0 {
+        0
+    } else {
+        (64 - n.leading_zeros()) as usize
+    }
+}
+
+fn heapify_mary(stack: &mut NockStack, m:MarySlice, m_noun: Noun ) -> Result<Noun, JetErr> {
+    let size = bex(simple_xeb(m.len as usize))-1;
+
+    // calc high-bit
+    let high_bit = lsh(stack, 6, size*5, D(1).as_atom()?)?.as_atom()?;
+
+    // make leaves
+    let mut res_vec:Vec<Noun> = Vec::new();
+    for i in 0 .. m.len {
+        let t=snag_as_bpoly(stack, m_noun, i as usize)?;
+        let hashable_bpoly = T(stack, &[D(tas!(b"mary")), D(1), t]);
+        let hash = hash_hashable(stack, hashable_bpoly)?;
+        let leafs = leaf_sequence(stack, hash)?;
+        res_vec.push(leafs);
+    }
+    let mut res = vecnoun_to_hoon_list(stack, res_vec.as_slice());
+
+    let mut curr = res;
+    loop {
+        let lent_curr = lent(curr)?;
+        if lent_curr==1 {
+            break;
+        } else {
+            let pairs = hash_pairs(stack, curr)?;
+            res = weld(stack, pairs, res)?;
+            curr = pairs;
+        }
+    };
+
+    let a = zing(stack, res)?;
+    let b = rep(stack, D(6), a)?;
+    let c = add(stack, high_bit, b.as_atom()?);
+    let res = T(stack, &[D(5), D(size as u64), c.as_noun()]);
+
+    Ok(res)
+}
+
+
+pub fn snag_as_digest_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let sam = slot(subject, 6)?;
+    let m_noun = slot(sam, 2)?;
+    let i_noun = slot(sam, 3)?;
+
+    let i = i_noun.as_atom()?.as_u64()? as usize;
+    snag_as_digest( stack, m_noun, i)
+}
+
+fn snag_as_digest(stack: &mut NockStack, m_noun: Noun, i: usize) -> Result<Noun, JetErr>{
+    let buf = snag_one(stack, m_noun, i)?.as_atom()?;
+
+    let mut digest = [0u64; DIGEST_LENGTH];
+    digest[0] = cut(stack, 6, 0, 1, buf)?.as_atom()?.as_u64()?;
+    digest[1] = cut(stack, 6, 1, 1, buf)?.as_atom()?.as_u64()?;
+    digest[2] = cut(stack, 6, 2, 1, buf)?.as_atom()?.as_u64()?;
+    digest[3] = cut(stack, 6, 3, 1, buf)?.as_atom()?.as_u64()?;
+    digest[4] = cut(stack, 6, 4, 1, buf)?.as_atom()?.as_u64()?;
+
+    Ok(digest_to_noundigest(stack, digest))
 }
 
