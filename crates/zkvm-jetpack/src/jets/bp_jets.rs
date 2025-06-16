@@ -1,6 +1,7 @@
 use nockvm::interpreter::Context;
 use nockvm::jets::util::slot;
 use nockvm::jets::Result;
+use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
 
 use crate::form::math::bpoly::*;
@@ -11,11 +12,12 @@ use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::{AtomExt, NounExt};
 
 pub fn bpoly_to_list_jet(context: &mut Context, subject: Noun) -> Result {
+    let stack = &mut context.stack;
     let sam = slot(subject, 6)?;
-    bpoly_to_list(context, sam)
+    bpoly_to_list(stack, sam)
 }
 
-pub fn bpoly_to_list(context: &mut Context, sam: Noun) -> Result {
+pub fn bpoly_to_list(stack: &mut NockStack, sam: Noun) -> Result {
     let Ok(sam_bpoly) = BPolySlice::try_from(sam) else {
         return jet_err();
     };
@@ -30,8 +32,8 @@ pub fn bpoly_to_list(context: &mut Context, sam: Noun) -> Result {
     }
 
     for i in (0..len).rev() {
-        let res_atom = Atom::new(&mut context.stack, sam_bpoly.0[i].into());
-        res_list = T(&mut context.stack, &[res_atom.as_noun(), res_list]);
+        let res_atom = Atom::new(stack, sam_bpoly.0[i].into());
+        res_list = T(stack, &[res_atom.as_noun(), res_list]);
     }
 
     Ok(res_list)
