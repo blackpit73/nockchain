@@ -10,7 +10,7 @@ use crate::jets::utils::jet_err;
 
 use crate::hand::structs::HoonList;
 use crate::jets::bp_jets::bpoly_to_list;
-use crate::jets::mary_jets::change_step;
+use crate::jets::mary_jets::{change_step, get_mary_fields};
 use crate::jets::shape_jets::{do_leaf_sequence, dyck, leaf_sequence};
 use crate::noun::noun_ext::NounExt;
 use crate::utils::{belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, hoon_list_to_vecnoun, vec_to_hoon_list, vecnoun_to_hoon_list};
@@ -409,21 +409,23 @@ fn hash_hashable_list(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
     hash_noun_varlen(stack, turn_list)
 }
 fn hash_hashable_mary(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
-    let [ma_step, ma_array] = p.uncell()?; // +$  mary  [step=@ =array]
-    let [ma_array_len, _ma_array_dat] = ma_array.uncell()?; // +$  array  [len=@ dat=@ux]
+    let (ma_step, ma_array_len, _ma_array_dat) = get_mary_fields(p)?;
 
     let ma_changed = change_step(stack, p, D(1))?;
     let [_ma_changed_step, ma_changed_array] = ma_changed.uncell()?; // +$  mary  [step=@ =array]
     let bpoly_list = bpoly_to_list( stack, ma_changed_array )?;
     let hash_belts_list = hash_belts_list(stack, bpoly_list)?;
 
-    let leaf_step = T(stack, &[D(tas!(b"leaf")), ma_step]);
-    let leaf_len = T(stack, &[D(tas!(b"leaf")), ma_array_len]);
+    let leaf_step = T(stack, &[D(tas!(b"leaf")), ma_step.as_noun()]);
+    let leaf_len = T(stack, &[D(tas!(b"leaf")), ma_array_len.as_noun()]);
     let hash = T(stack, &[D(tas!(b"hash")), hash_belts_list]);
     let arg = T(stack, &[leaf_step, leaf_len, hash]);
 
     hash_hashable(stack, arg)
 }
+
+
+
 fn hash_hashable_other(stack: &mut NockStack, p: Noun, q:Noun) -> Result<Noun, JetErr> {
     let ph = hash_hashable(stack, p)?;
     let qh = hash_hashable(stack, q)?;

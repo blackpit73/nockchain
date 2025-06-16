@@ -271,9 +271,9 @@ pub fn bp_build_merk_heap_jet(context: &mut Context, subject: Noun) -> Result<No
     let stack = &mut context.stack;
     let mary_noun = slot(subject, 6)?;
 
-    let m = MarySlice::try_from(mary_noun).expect("cannot convert m arg");
-    let heap_mary = heapify_mary(stack, m, mary_noun)?;
-    let xeb_m = simple_xeb(m.len as usize);
+    let (_ma_step, ma_array_len, _ma_array_dat) = get_mary_fields(mary_noun)?;
+    let heap_mary = heapify_mary(stack, mary_noun)?;
+    let xeb_m = simple_xeb(ma_array_len.as_u64()? as usize);
 
     let snag_digest = snag_as_digest( stack, heap_mary, 0)?;
 
@@ -290,15 +290,22 @@ fn simple_xeb(n : usize) -> usize {
     }
 }
 
-fn heapify_mary(stack: &mut NockStack, m:MarySlice, m_noun: Noun ) -> Result<Noun, JetErr> {
-    let size = bex(simple_xeb(m.len as usize))-1;
+pub fn get_mary_fields(p: Noun) -> Result<(Atom, Atom, Noun), JetErr> {
+    let [ma_step, ma_array] = p.uncell()?; // +$  mary  [step=@ =array]
+    let [ma_array_len, ma_array_dat] = ma_array.uncell()?; // +$  array  [len=@ dat=@ux]
+    Ok((ma_step.as_atom()?, ma_array_len.as_atom()?, ma_array_dat))
+}
+
+fn heapify_mary(stack: &mut NockStack, m_noun: Noun ) -> Result<Noun, JetErr> {
+    let (_ma_step, ma_array_len, _ma_array_dat) = get_mary_fields(m_noun)?;
+    let size = bex(simple_xeb(ma_array_len.as_u64()? as usize))-1;
 
     // calc high-bit
     let high_bit = lsh(stack, 6, size*5, D(1).as_atom()?)?.as_atom()?;
 
     // make leaves
     let mut res_vec:Vec<Noun> = Vec::new();
-    for i in 0 .. m.len {
+    for i in 0 .. ma_array_len.as_u64()? {
         let t=snag_as_bpoly(stack, m_noun, i as usize)?;
         let hashable_bpoly = T(stack, &[D(tas!(b"mary")), D(1), t]);
         let hash = hash_hashable(stack, hashable_bpoly)?;
