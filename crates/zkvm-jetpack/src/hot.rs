@@ -948,23 +948,23 @@ pub const ZTD_JETS: &[HotEntry] = &[
         1,
         hash_noun_varlen_jet,
     ),
-    // (
-    //     &[
-    //         K_138,
-    //         Left(b"one"),
-    //         Left(b"two"),
-    //         Left(b"tri"),
-    //         Left(b"qua"),
-    //         Left(b"pen"),
-    //         Left(b"zeke"),
-    //         Left(b"ext-field"),
-    //         Left(b"misc-lib"),
-    //         Left(b"tip5-lib"),
-    //         Left(b"hash-hashable"),
-    //     ],
-    //     1,
-    //     hash_hashable_jet,
-    // ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"tip5-lib"),
+            Left(b"hash-hashable"),
+        ],
+        1,
+        hash_hashable_jet,
+    ),
 ];
 
 pub const KEYGEN_JETS: &[HotEntry] = &[(
