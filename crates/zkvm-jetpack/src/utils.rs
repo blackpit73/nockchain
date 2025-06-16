@@ -16,6 +16,13 @@ pub fn felt_atom_is_valid(felt_atom: IndirectAtom) -> bool {
     unsafe { *(dat_ptr.add(3)) == 0x1 }
 }
 
+pub fn vecnoun_to_hoon_list(stack: &mut NockStack, vec: &[Noun]) -> Noun {
+    let mut list = D(0);
+    for n in vec.iter().rev() {
+        list = T(stack, &[*n, list]);
+    }
+    list
+}
 
 pub fn vec_to_hoon_list(stack: &mut NockStack, vec: &[u64]) -> Noun {
     let mut list = D(0);
@@ -100,6 +107,19 @@ pub fn hoon_list_to_vecbelt(list: Noun) -> Result<Vec<Belt>, JetErr> {
     while unsafe { !input_iterate.raw_equals(&D(0)) } {
         let input_cell = input_iterate.as_cell()?;
         let head_belt = Belt(input_cell.head().as_atom()?.as_u64()?);
+        input_vec.push(head_belt);
+        input_iterate = input_cell.tail();
+    }
+
+    Ok(input_vec)
+}
+
+pub fn hoon_list_to_vecnoun(list: Noun) -> Result<Vec<Noun>, JetErr> {
+    let mut input_iterate = list;
+    let mut input_vec: Vec<Noun> = Vec::new();
+    while unsafe { !input_iterate.raw_equals(&D(0)) } {
+        let input_cell = input_iterate.as_cell()?;
+        let head_belt = input_cell.head();
         input_vec.push(head_belt);
         input_iterate = input_cell.tail();
     }

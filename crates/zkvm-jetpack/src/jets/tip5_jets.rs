@@ -8,7 +8,7 @@ use crate::form::math::tip5::*;
 use crate::form::{Belt, Poly};
 use crate::jets::utils::jet_err;
 
-use crate::utils::{belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, vec_to_hoon_list};
+use crate::utils::{belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, hoon_list_to_vecnoun, vec_to_hoon_list, vecnoun_to_hoon_list};
 use bitvec::prelude::{BitSlice, Lsb0};
 use bitvec::view::BitView;
 use nockvm::mem::NockStack;
@@ -253,24 +253,18 @@ fn digest_to_noundigest(stack: &mut NockStack, digest: [u64; 5]) -> Noun {
 }
 
 
-  // ::  +hash-10: hash list of 10 belts into a list of 5 belts
-  // ++  hash-10
-  //   ~/  %hash-10
-  //   |=  input=(list belt)
-  //   ::  output length is 5
-  //   ^-  (list belt)
-  //   ?>  =((lent input) rate)
-  //   ?>  (levy input based)
-  //   =.  input   (turn input montify)
-  //   =/  sponge  (init-tip5-state %fixed)
-  //   =.  sponge  (permutation (weld input (slag rate sponge)))
-  //   (turn (scag digest-length sponge) mont-reduction)
-
+//hash-10: hash list of 10 belts into a list of 5 belts
 pub fn hash_10_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let stack = &mut context.stack;
     let input = slot(subject, 6)?;
     let mut input_vec = hoon_list_to_vecbelt(input)?;
 
+    let digest = hash_10(&mut input_vec);
+
+    Ok(vec_to_hoon_list(stack, &digest))
+}
+
+fn hash_10(mut input_vec: &mut Vec<Belt>) -> [u64; 5] {
     // check input
     let (q, r) = tip5_calc_q_r(&input_vec);
     assert_eq!(q, 1);
@@ -288,8 +282,54 @@ pub fn hash_10_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr>
     tip5_absorb_rate(&mut sponge, input_vec.as_slice());
 
     //  calc digest
-    let digest = tip5_calc_digest(&sponge);
-    Ok(vec_to_hoon_list(stack, &digest))
+    tip5_calc_digest(&sponge)
+}
+
+// ++  hash-pairs
+//   ~/  %hash-pairs
+//   |=  lis=(list (list @))
+//   ^-  (list (list @))
+//   |^ :: Produce a core whose battery includes a $ arm and compute the latter.
+//   %+  turn
+//     (indices (lent lis))
+//   |=  b=@
+//   ?:  =(+(b) (lent lis))
+//     (snag b lis)
+//   (hash-10:tip5 (weld (snag b lis) (snag +(b) lis)))
+//
+//   ++  indices :: 8 => [0 [2 [4 [6 ~]]]]
+//     |=  n=@
+//     ^-  (list @)
+//     ?<  =(n 0)  :: assert(n!=0)
+//     =/  i  0
+//     |-
+//     ?:  (gte i n)  ~
+//     [i $(i (add 2 i))]
+pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let lis_noun = slot(subject, 6)?; // (list (list @))
+
+    let lis = hoon_list_to_vecnoun(lis_noun)?;
+    let lent_lis = lis.len(); assert!(lent_lis>0);
+
+    let mut res: Vec<Noun> = Vec::new();
+
+    for i in 0 .. lent_lis/2 {
+        let b = i*2;
+        if (b+1)==lent_lis {
+            res.push(lis[b]);
+        } else {
+            let b0 = hoon_list_to_vecbelt(lis[b])?;
+            let mut b1 = hoon_list_to_vecbelt(lis[b+1])?;
+            let mut pair = b0;
+            pair.append(&mut b1);
+            let digest = hash_10(&mut pair);
+            let digest_noun=vec_to_hoon_list(stack, &digest);
+            res.push(digest_noun);
+        }
+    }
+
+    Ok(vecnoun_to_hoon_list(stack, res.as_slice()))
 }
 
 
