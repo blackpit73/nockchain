@@ -9,10 +9,19 @@ use nockvm::noun::{Noun, D, T};
 pub fn leaf_sequence_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let t = slot(subject, 6)?;
 
+    // let mut leaf: Vec<u64> = Vec::<u64>::new();
+    // do_leaf_sequence(t, &mut leaf)?;
+    // Ok(vec_to_hoon_list(&mut context.stack, &leaf))
+
+    leaf_sequence(&mut context.stack, t)
+}
+
+pub fn leaf_sequence(stack: &mut NockStack, t: Noun) -> Result<Noun, JetErr> {
     let mut leaf: Vec<u64> = Vec::<u64>::new();
     do_leaf_sequence(t, &mut leaf)?;
-    Ok(vec_to_hoon_list(&mut context.stack, &leaf))
+    Ok(vec_to_hoon_list(stack, &leaf))
 }
+
 
 pub fn do_leaf_sequence(noun: Noun, vec: &mut Vec<u64>) -> Result<(), JetErr> {
     if noun.is_atom() {
@@ -29,23 +38,23 @@ pub fn do_leaf_sequence(noun: Noun, vec: &mut Vec<u64>) -> Result<(), JetErr> {
 pub fn dyck_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let stack = &mut context.stack;
     let t = slot(subject, 6)?;
+    dyck(stack, t)
+}
 
-    let vec=dyck(stack, t, D(0))?;
+pub fn dyck(stack: &mut NockStack, t: Noun) -> Result<Noun, JetErr> {
+    let vec = dyck_recursive(stack, t, D(0))?;
     flop(stack, vec)
 }
 
-fn dyck(stack: &mut NockStack, t: Noun, vec:Noun) -> Result<Noun,JetErr> {
-
+fn dyck_recursive(stack: &mut NockStack, t: Noun, vec:Noun) -> Result<Noun,JetErr> {
     if t.is_atom() {
         Ok(vec)
     } else {
         let t_cell = t.as_cell()?;
-        
         let vec_inner = T(stack, &[D(0), vec]);
-        let dyck_inner = dyck(stack, t_cell.head(), vec_inner)?;
-
+        let dyck_inner = dyck_recursive(stack, t_cell.head(), vec_inner)?;
         let vec_outer = T(stack, &[D(1), dyck_inner]);
-        dyck(stack, t_cell.tail(), vec_outer)
+        dyck_recursive(stack, t_cell.tail(), vec_outer)
     }
 }
 

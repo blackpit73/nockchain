@@ -1,13 +1,12 @@
 use nockvm::interpreter::Context;
-use nockvm::jets::util::{bite_to_word, bits_to_word, chop, slot};
+use nockvm::jets::util::{bite_to_word, chop, slot};
 use nockvm::jets::JetErr;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
 use nockvm::jets::list::util::{lent, reap};
-use nockvm::jets::bits::util::{lsh, met};
+use nockvm::jets::bits::util::{lsh};
 use nockvm::jets::math::util::add;
 use nockvm::mem::NockStack;
 use tracing::{debug,error};
-use nockvm::jets::bits::jet_xeb;
 use crate::form::Belt;
 use crate::form::mary::*;
 use crate::form::math::mary::*;
@@ -16,11 +15,9 @@ use crate::hand::handle::{finalize_mary, finalize_poly, new_handle_mut_mary, new
 use crate::hand::structs::HoonList;
 use crate::jets::base_jets::{levy_based, rip_correct};
 use crate::jets::bp_jets::init_bpoly;
-use crate::jets::shape_jets::leaf_sequence_jet;
 use crate::jets::tip5_jets::digest_to_noundigest;
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::AtomExt;
-use crate::utils::u128_as_noun;
 
 pub fn mary_swag_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let door = slot(subject, 7)?;
