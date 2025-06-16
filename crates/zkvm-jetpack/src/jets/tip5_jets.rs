@@ -14,8 +14,6 @@ use crate::jets::mary_jets::{change_step, get_mary_fields};
 use crate::jets::shape_jets::{do_leaf_sequence, dyck, leaf_sequence};
 use crate::noun::noun_ext::NounExt;
 use crate::utils::{belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, hoon_list_to_vecnoun, vec_to_hoon_list, vecnoun_to_hoon_list};
-use bitvec::prelude::{BitSlice, Lsb0};
-use bitvec::view::BitView;
 use nockvm::jets::list::util::{lent, weld};
 use nockvm::mem::NockStack;
 use nockvm_macros::tas;
@@ -209,21 +207,14 @@ pub fn mont_reduction_jet(context: &mut Context, subject: Noun) -> Result<Noun, 
     Ok(belt_as_noun(&mut context.stack, mont_reduction(x_u128)))
 }
 
-pub fn mont_reduction(x: u128) -> Belt {
+pub fn mont_reduction(x_u128: u128) -> Belt {
     // mont-reduction: computes x•r^{-1} = (xr^{-1} mod p).
-    assert!(x < RP);
+    assert!(x_u128 < RP);
 
     const R_MOD_P1: u128 = (R_MOD_P + 1) as u128; // 4.294.967.296
     const RX: u128 = R; // 18.446.744.073.709.551.616
     const PX: u128 = P as u128; // 0xffffffff00000001
 
-    let parts: [u64; 2] = [
-        (x & 0xFFFFFFFFFFFFFFFF) as u64, // lower 64 bits
-        (x >> 64) as u64,                // upper 64 bits
-    ];
-    let x_bitslice: &BitSlice<u64, Lsb0> = parts.view_bits::<Lsb0>();
-    let x_u128 = bitslice_to_u128(x_bitslice);
-    
     let x1_u128_div = x_u128 / R_MOD_P1;
     let x1_u128 = x1_u128_div % R_MOD_P1;
     let x2_u128 = x_u128 / RX;
