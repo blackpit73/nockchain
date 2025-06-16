@@ -8,18 +8,17 @@ use crate::form::math::tip5::*;
 use crate::form::{Belt, Poly};
 use crate::jets::utils::jet_err;
 
+use crate::hand::structs::HoonList;
+use crate::jets::bp_jets::bpoly_to_list;
+use crate::jets::mary_jets::change_step;
 use crate::jets::shape_jets::{do_leaf_sequence, dyck, leaf_sequence};
+use crate::noun::noun_ext::NounExt;
 use crate::utils::{belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, hoon_list_to_vecnoun, vec_to_hoon_list, vecnoun_to_hoon_list};
 use bitvec::prelude::{BitSlice, Lsb0};
 use bitvec::view::BitView;
-use tracing::info;
-use nockvm::jets::JetErr::Fail;
 use nockvm::jets::list::util::{lent, weld};
 use nockvm::mem::NockStack;
 use nockvm_macros::tas;
-use crate::jets::bp_jets::bpoly_to_list;
-use crate::jets::mary_jets::change_step;
-use crate::noun::noun_ext::NounExt;
 
 pub fn hoon_list_to_sponge(list: Noun) -> Result<[u64; STATE_SIZE], JetErr> {
     if list.is_atom() {
@@ -391,26 +390,35 @@ fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result<Noun, JetErr> {
     }
 }
 
-fn hash_hashable_hash(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
+fn hash_hashable_hash(_stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
     Ok(p)
 }
 fn hash_hashable_leaf(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
     hash_noun_varlen(stack, p)
 }
 fn hash_hashable_list(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
-    //turn_hashable
-    // (hash-noun-varlen (turn p.h hash-hashable))
-    //hash_noun_varlen(stack, turn_hashable)
-    todo!()
+    let turn : Vec<Noun> = HoonList::try_from(p)?
+        .into_iter()
+        .map(|x| hash_hashable(stack, x).unwrap())
+        .collect();
+    let turn_list = vecnoun_to_hoon_list(stack, &turn);
+    hash_noun_varlen(stack, turn_list)
 }
 fn hash_hashable_mary(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
-    let ma_changed_step = change_step(stack, p, D(1))?;
-    let [_step, ma_array] = ma_changed_step.uncell()?; // +$  mary  [step=@ =array]
-    let bpoly_list = bpoly_to_list( stack, ma_array )?;
+    let [ma_step, ma_array] = p.uncell()?; // +$  mary  [step=@ =array]
+    let [ma_array_len, _ma_array_dat] = ma_array.uncell()?; // +$  array  [len=@ dat=@ux]
+
+    let ma_changed = change_step(stack, p, D(1))?;
+    let [_ma_changed_step, ma_changed_array] = ma_changed.uncell()?; // +$  mary  [step=@ =array]
+    let bpoly_list = bpoly_to_list( stack, ma_changed_array )?;
     let hash_belts_list = hash_belts_list(stack, bpoly_list)?;
 
-    let cell = T(stack, &[D(tas!(b"hash")), hash_belts_list]);
-    Ok(cell)
+    let leaf_step = T(stack, &[D(tas!(b"leaf")), ma_step]);
+    let leaf_len = T(stack, &[D(tas!(b"leaf")), ma_array_len]);
+    let hash = T(stack, &[D(tas!(b"hash")), hash_belts_list]);
+    let arg = T(stack, &[leaf_step, leaf_len, hash]);
+
+    hash_hashable(stack, arg)
 }
 fn hash_hashable_other(stack: &mut NockStack, p: Noun, q:Noun) -> Result<Noun, JetErr> {
     let ph = hash_hashable(stack, p)?;
