@@ -865,6 +865,23 @@ pub const ZTD_JETS: &[HotEntry] = &[
         1,
         hash_pairs_jet,
     ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"tip5-lib"),
+            Left(b"hash-ten-cell"),
+        ],
+        1,
+        hash_ten_cell_jet,
+    ),
 ];
 
 pub const KEYGEN_JETS: &[HotEntry] = &[(
