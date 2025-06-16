@@ -12,8 +12,14 @@ use crate::jets::shape_jets::{do_leaf_sequence, dyck, leaf_sequence};
 use crate::utils::{belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, hoon_list_to_vecnoun, vec_to_hoon_list, vecnoun_to_hoon_list};
 use bitvec::prelude::{BitSlice, Lsb0};
 use bitvec::view::BitView;
+use tracing::info;
+use nockvm::jets::JetErr::Fail;
 use nockvm::jets::list::util::{lent, weld};
 use nockvm::mem::NockStack;
+use nockvm_macros::tas;
+use crate::jets::bp_jets::bpoly_to_list;
+use crate::jets::mary_jets::change_step;
+use crate::noun::noun_ext::NounExt;
 
 pub fn hoon_list_to_sponge(list: Noun) -> Result<[u64; STATE_SIZE], JetErr> {
     if list.is_atom() {
@@ -323,10 +329,10 @@ pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetE
 pub fn hash_ten_cell_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let stack = &mut context.stack;
     let ten_cell = slot(subject, 6)?; // [noun-digest noun-digest]
+    hash_ten_cell(stack, ten_cell)
+}
 
-    //   |=  =ten-cell  :: [noun-digest noun-digest]
-    //   ^-  noun-digest    :: [belt belt belt belt belt]
-
+fn hash_ten_cell(stack: &mut NockStack, ten_cell: Noun) -> Result<Noun, JetErr> {
     // leaf_sequence(ten-cell)
     let mut leaf: Vec<u64> = Vec::<u64>::new();
     do_leaf_sequence(ten_cell, &mut leaf)?;
@@ -337,32 +343,83 @@ pub fn hash_ten_cell_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
     Ok(digest_to_noundigest(stack, digest))
 }
 
-
-
-// ++  hash-noun-varlen
-//   ~/  %hash-noun-varlen
-//   |=  n=*
-//   ^-  noun-digest
-//   =/  leaf=(list @)  (leaf-sequence:shape n)
-//   =/  dyck=(list @)  (dyck:shape n)
-//   =/  size  (lent leaf)
-//   (hash-belts-list [size (weld leaf dyck)])
 pub fn hash_noun_varlen_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let stack = &mut context.stack;
     let n = slot(subject, 6)?;
+    hash_noun_varlen(stack, n)
+}
 
+fn hash_noun_varlen(stack: &mut NockStack, n: Noun) -> Result<Noun, JetErr> {
     let leaf = leaf_sequence(stack, n)?;
     let dyck = dyck(stack, n)?;
     let size = lent(leaf).map(|x| D(x as u64))?;
 
     // [size (weld leaf dyck)]
     let weld = weld(stack, leaf, dyck)?;
-    let arg = T( stack,&[ size, weld]);
+    let arg = T(stack, &[size, weld]);
 
     hash_belts_list(stack, arg)
 }
 
+pub fn hash_hashable_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let h = slot(subject, 6)?;
 
+    hash_hashable(stack, h)
+}
+
+fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result<Noun, JetErr> {
+    if !h.is_cell() {
+        return jet_err()
+    }
+
+    let h_head = h.as_cell()?.head();
+    let h_tail = h.as_cell()?.tail();
+
+    if h_head.is_direct() {
+        let tag = h_head.as_direct()?;
+        let res = match tag.data() {
+            tas!(b"hash") => hash_hashable_hash(stack, h_tail),
+            tas!(b"leaf") => hash_hashable_leaf(stack, h_tail),
+            tas!(b"list") => hash_hashable_list(stack, h_tail),
+            tas!(b"mary") => hash_hashable_mary(stack, h_tail),
+            _ => hash_hashable_other(stack, h_head, h_tail)
+        };
+        res
+    } else {
+        hash_hashable_other(stack, h_head, h_tail)
+    }
+}
+
+fn hash_hashable_hash(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
+    Ok(p)
+}
+fn hash_hashable_leaf(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
+    hash_noun_varlen(stack, p)
+}
+fn hash_hashable_list(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
+    //turn_hashable
+    // (hash-noun-varlen (turn p.h hash-hashable))
+    //hash_noun_varlen(stack, turn_hashable)
+    todo!()
+}
+fn hash_hashable_mary(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
+    let ma_changed_step = change_step(stack, p, D(1))?;
+    let [_step, ma_array] = ma_changed_step.uncell()?; // +$  mary  [step=@ =array]
+    let bpoly_list = bpoly_to_list( stack, ma_array )?;
+    let hash_belts_list = hash_belts_list(stack, bpoly_list)?;
+
+    let cell = T(stack, &[D(tas!(b"hash")), hash_belts_list]);
+    Ok(cell)
+}
+fn hash_hashable_other(stack: &mut NockStack, p: Noun, q:Noun) -> Result<Noun, JetErr> {
+    let ph = hash_hashable(stack, p)?;
+    let qh = hash_hashable(stack, q)?;
+
+    let cell = T(stack, &[ph, qh]);
+
+    hash_ten_cell(stack, cell)
+}
 
 
 #[cfg(test)]

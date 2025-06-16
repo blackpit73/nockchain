@@ -17,7 +17,7 @@ use crate::jets::base_jets::{levy_based, rip_correct};
 use crate::jets::bp_jets::init_bpoly;
 use crate::jets::tip5_jets::digest_to_noundigest;
 use crate::jets::utils::jet_err;
-use crate::noun::noun_ext::AtomExt;
+use crate::noun::noun_ext::{AtomExt, NounExt};
 
 pub fn mary_swag_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let door = slot(subject, 7)?;
@@ -348,4 +348,31 @@ fn snag_as_digest(stack: &mut NockStack, m_noun: Noun, i: usize) -> Result<Noun,
 }
 
 
+pub fn change_step_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let door = slot(subject, 7)?;
+    let ma_noun = slot(door, 6)?;
+    let new_step_noun = slot(subject, 6)?;
+
+    change_step(stack, ma_noun, new_step_noun)
+}
+
+pub fn change_step(stack: &mut NockStack, ma_noun: Noun, new_step_noun: Noun) -> Result<Noun, JetErr> {
+    let new_step = new_step_noun.as_atom()?.as_u64()?; //   |=  [new-step=@]  ??
+
+    let [ma_step_noun, ma_array] = ma_noun.uncell()?; // +$  mary  [step=@ =array]
+    let [array_len_noun, array_dat] = ma_array.uncell()?; // +$  array  [len=@ dat=@ux]
+
+    let ma_step = ma_step_noun.as_atom()?.as_u64()?;
+    let array_len = array_len_noun.as_atom()?.as_u64()?;
+
+    if ma_step == new_step {
+        return Ok(ma_noun)
+    }
+    assert_eq!(0, (ma_step * array_len) % new_step);
+
+    let res1 = D((ma_step * array_len) / new_step);
+    let res = T(stack, &[new_step_noun, res1, array_dat]);
+    Ok(res)
+}
 
