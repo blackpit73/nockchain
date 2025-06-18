@@ -343,6 +343,20 @@ pub const XTRA_JETS: &[HotEntry] = &[
         1,
         bpeval_lift_jet,
     ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"based-noun"),
+        ],
+        1,
+        based_noun_jet,
+    ),
 ];
 
 pub const EXTENSION_FIELD_JETS: &[HotEntry] = &[
@@ -1042,7 +1056,7 @@ pub const ZTD_JETS: &[HotEntry] = &[
         ],
         1,
         digest_to_atom_jet,
-    ),    
+    ),
 ];
 
 pub const KEYGEN_JETS: &[HotEntry] = &[(
