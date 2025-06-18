@@ -1,7 +1,8 @@
+use ibig::UBig;
 use nockvm::interpreter::Context;
 use nockvm::jets::util::slot;
 use nockvm::jets::JetErr;
-use nockvm::noun::{Noun, D, T};
+use nockvm::noun::{Atom, Noun, D, T};
 
 use crate::based;
 use crate::form::math::tip5::*;
@@ -425,6 +426,29 @@ fn hash_hashable_other(stack: &mut NockStack, p: Noun, q:Noun) -> Result<Noun, J
 
     hash_ten_cell(stack, cell)
 }
+
+
+pub fn digest_to_atom_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let cells = slot(subject, 6)?;
+    let [a,b,c,d,e] = cells.uncell()?;
+    
+    let a_big = a.as_atom()?.as_ubig(stack);
+    let b_big = b.as_atom()?.as_ubig(stack);
+    let c_big = c.as_atom()?.as_ubig(stack);
+    let d_big = d.as_atom()?.as_ubig(stack);
+    let e_big = e.as_atom()?.as_ubig(stack);
+
+    let bp_big = b_big * UBig::from(P);
+    let cp2_big = c_big * UBig::from(P).pow(2);
+    let dp3_big = d_big * UBig::from(P).pow(3);
+    let ep4_big = e_big * UBig::from(P).pow(4);
+
+    let res : UBig = a_big + bp_big + cp2_big + dp3_big + ep4_big;
+
+    Ok(Atom::from_ubig(stack, &res).as_noun())
+}
+
 
 
 #[cfg(test)]

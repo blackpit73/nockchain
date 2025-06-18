@@ -1026,6 +1026,23 @@ pub const ZTD_JETS: &[HotEntry] = &[
         1,
         bp_is_zero_jet,
     ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"tip5-lib"),
+            Left(b"digest-to-atom"),
+        ],
+        1,
+        digest_to_atom_jet,
+    ),    
 ];
 
 pub const KEYGEN_JETS: &[HotEntry] = &[(
