@@ -1,22 +1,19 @@
-use num_traits::Zero;
-use nockvm::interpreter::Context;
-use nockvm::jets::bits::util::{lsh, rip};
-use nockvm::jets::list::util::{flop, snag, snip};
-use nockvm::jets::math::util::add;
-use nockvm::jets::util::slot;
-use nockvm::jets::{JetErr, Result};
-use nockvm::mem::NockStack;
-use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
 use crate::form::fext::{fadd, fmul};
 use crate::form::math::bpoly::*;
 use crate::form::poly::*;
 use crate::hand::handle::*;
 use crate::hand::structs::HoonList;
-use crate::jets::fpntt_jets::{felt_as_noun, felt_from_u64s, frep, frep_jet};
-use crate::jets::mary_jets::{get_mary_fields, lift_elt_jet, mary_swag_jet, mary_to_list, mary_to_list_fields, snag_one_fields};
+use crate::jets::fpntt_jets::{felt_as_noun, felt_from_u64s};
+use crate::jets::mary_jets::{mary_to_list_fields, snag_one_fields};
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::{AtomExt, NounExt};
-use crate::utils::{hoon_list_to_vecnoun, is_hoon_list_end, vecnoun_to_hoon_list};
+use crate::utils::is_hoon_list_end;
+use nockvm::interpreter::Context;
+use nockvm::jets::list::util::flop;
+use nockvm::jets::util::slot;
+use nockvm::jets::{JetErr, Result};
+use nockvm::mem::NockStack;
+use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
 
 pub fn bpoly_to_list_jet(context: &mut Context, subject: Noun) -> Result {
     let stack = &mut context.stack;
@@ -261,8 +258,7 @@ pub fn init_bpoly(list_belt: HoonList, res_poly: &mut [Belt]) {
 //-------------------------------------------------------------------------
 //
 
-pub fn bp_is_zero_jet(context: &mut Context, subject: Noun) -> Result {
-    let stack = &mut context.stack;
+pub fn bp_is_zero_jet(_context: &mut Context, subject: Noun) -> Result {
     let p = slot(subject, 6)?;
 
     if bp_is_zero(p) {
@@ -325,7 +321,7 @@ pub fn bpeval_lift_jet(context: &mut Context, subject: Noun) -> Result {
         fadd(&res_fmul, &res_lift, &mut res_add);
 
         if is_hoon_list_end(& p_cell.tail()) {
-            return (felt_as_noun(stack, res_add))
+            return felt_as_noun(stack, res_add)
         }
 
         res = res_add;
