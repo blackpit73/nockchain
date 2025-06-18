@@ -1,3 +1,4 @@
+use ibig::UBig;
 use crate::form::math::{badd, bmul, bpow, PRIME_128};
 
 pub const DIGEST_LENGTH: usize = 5;
