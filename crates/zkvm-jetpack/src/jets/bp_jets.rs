@@ -1,19 +1,19 @@
 use num_traits::Zero;
 use nockvm::interpreter::Context;
 use nockvm::jets::bits::util::{lsh, rip};
-use nockvm::jets::list::util::{flop, snip};
+use nockvm::jets::list::util::{flop, snag, snip};
 use nockvm::jets::math::util::add;
 use nockvm::jets::util::slot;
-use nockvm::jets::Result;
+use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
-
+use crate::form::fext::{fadd, fmul};
 use crate::form::math::bpoly::*;
 use crate::form::poly::*;
 use crate::hand::handle::*;
 use crate::hand::structs::HoonList;
-use crate::jets::fpntt_jets::{frep, frep_jet};
-use crate::jets::mary_jets::{get_mary_fields, lift_elt_jet, mary_to_list};
+use crate::jets::fpntt_jets::{felt_as_noun, felt_from_u64s, frep, frep_jet};
+use crate::jets::mary_jets::{get_mary_fields, lift_elt_jet, mary_swag_jet, mary_to_list, mary_to_list_fields, snag_one_fields};
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::{AtomExt, NounExt};
 use crate::utils::{hoon_list_to_vecnoun, is_hoon_list_end, vecnoun_to_hoon_list};
@@ -261,143 +261,75 @@ pub fn init_bpoly(list_belt: HoonList, res_poly: &mut [Belt]) {
 //-------------------------------------------------------------------------
 //
 
-
-
-
-
-
-//
-// ::  +bcan: gives the canonical leading-zero-stripped representation of p(x)
-// ++  bcan
-//   |=  p=poly
-//   ^-  poly
-//   =.  p  (flop p)
-//   |-
-//   ?~  p
-//     ::  TODO: fix this
-//     ~[0]
-//   ?:  =(i.p 0)
-//     $(p t.p) poly
-//   (flop p)
-// fn bcan(stack: &mut NockStack, p: Noun) -> Result {
-//     let mut p_vec : Vec<Noun> = hoon_list_to_vecnoun(p)?;
-//
-//     loop {
-//         let last = p_vec.last();
-//         if ! last.is_some() {
-//             break;
-//         }
-//
-//         let res64 = last.unwrap().as_atom()?.as_u64();
-//         if res64.is_err() {
-//             break; // larger than u64 --> not zero --> done
-//         }
-//
-//         if res64? != 0 {
-//             break;
-//
-//         }
-//
-//         p_vec.pop();
-//     }
-//
-//     let res = vecnoun_to_hoon_list(stack, p_vec.as_slice());
-//     Ok(res)
-// }
-
-//
-// // ++  bpcan
-// //   |=  bp=bpoly
-// //   ^-  bpoly
-// //   =/  p  ~(to-poly bop bp)
-// //   (init-bpoly (bcan p))
-// fn bpcan(stack: &mut NockStack, bpoly: Noun) -> Result {
-//     let ma = T(stack, &[D(1), bpoly]);
-//     let p = mary_to_list(stack, ma)?;
-//     let res_bcan = bcan(stack, p)?;
-//
-//     let list_belt = HoonList::try_from(res_bcan)?.into_iter();
-//     let count = list_belt.count();
-//     let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(count));
-//     init_bpoly(list_belt, res_poly);
-//
-//     let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
-//     Ok(res_cell)
-// }
-//
-
-
-// ++  bp-is-zero
-//   ~/  %bp-is-zero
-//   |=  p=bpoly
-//   ^-  ?
-//   ~+
-//   =.  p  (bpcan p)
-//   |(=(len.p 0) =(p zero-bpoly))
 pub fn bp_is_zero_jet(context: &mut Context, subject: Noun) -> Result {
     let stack = &mut context.stack;
     let p = slot(subject, 6)?;
 
-    let p_slice= BPolySlice::try_from(p)?;
-    if p_slice.is_zero() {
+    if bp_is_zero(p) {
         Ok(YES)
     } else {
         Ok(NO)
     }
 }
 
+pub fn bp_is_zero(p: Noun) -> bool {
+    let p_slice = BPolySlice::try_from(p).expect("invalid p");
+    p_slice.is_zero()
+}
+
+// lift: the unique lift of a base field element into an extension field (Belt -> Felt)
+fn lift(belt: Belt) -> Felt {
+    felt_from_u64s(belt.0, 0, 0)
+}
 
 
-// ::  +lift: the unique lift of a base field element into an extension field
-// ++  lift
-//   |=  =belt
-//   ~+
-//   ^-  felt
-//   %-  frep
-//   :-  belt
-//   (reap (dec deg) 0)
-//
-// > (lift.two 1)
-// 0x1.0000.0000.0000.0000.0000.0000.0000.0000.0000.0000.0000.0001
-// > (lift.two 0)
-// 0x1.0000.0000.0000.0000.0000.0000.0000.0000.0000.0000.0000.0000
 
-// fn lift(stack: &mut NockStack, belt: Belt) -> Felt {
-//
-//     let x = hoon_list_to_vecbelt(sample)?;
-//     let felt = frep(x)?;
-//     felt_as_noun(context, felt)
-//
-// }
+pub fn get_bpoly_fields(bpoly: Noun) -> std::result::Result<(Atom, Atom), JetErr> {
+    let [bpoly_len, bpoly_dat] = bpoly.uncell()?; // +$  bpoly  [len=@ dat=@ux]
+    Ok((bpoly_len.as_atom()?, bpoly_dat.as_atom()?))
+}
 
 
 // bpeval-lift: evaluate a bpoly at a felt
 pub fn bpeval_lift_jet(context: &mut Context, subject: Noun) -> Result {
     let stack = &mut context.stack;
     let sam = slot(subject, 6)?;
-    let [bp, x] = sam.uncell()?;
+    let [bp, x_noun] = sam.uncell()?; // TODO defaults? [bp=`bpoly`one-bpoly x=`felt`(lift 1)]
+    let x = x_noun.as_felt()?;
 
-    //lift
+    let lift0 = lift(Belt(0));
 
-    // ++  bpeval-lift
-    //   ~/  %bpeval-lift
-    //   |:  [bp=`bpoly`one-bpoly x=`felt`(lift 1)]
-    //   ^-  felt
-    //   ~+
-    //   ?:  (bp-is-zero bp)  (lift 0)
-    //   ?:  =(len.bp 1)  (lift (~(snag bop bp) 0))
-    //   =/  p  ~(to-poly bop bp)
-    //   =.  p  (flop p)
-    //   =/  res=@  (lift 0)
-    //   |-
-    //   ?~  p    !!
-    //   ?~  t.p
-    //     (fadd (fmul res x) (lift i.p))
-    //   ::  based on p(x) = (...((a_n)x + a_{n-1})x + a_{n-2})x + ... )
-    //   $(res (fadd (fmul res x) (lift i.p)), p t.p)
+    if bp_is_zero(bp) {
+        return felt_as_noun(stack, lift0);
+    }
 
+    let (bp_len, bp_dat) = get_bpoly_fields(bp)?;
 
+    if bp_len.as_u64()?==1 {
+        return snag_one_fields(stack, 0, 1, bp_dat);
+    }
 
-    jet_err()
+    let p = mary_to_list_fields(stack, bp_len, bp_dat.as_noun(), 1)?;
+    let mut p = flop(stack, p)?;
+    let mut res = lift0;
+    loop {
+        if is_hoon_list_end(&p) {
+            return jet_err();
+        }
+
+        let p_cell = p.as_cell()?;
+        let res_lift = lift(p_cell.head().as_belt()?);
+        let mut res_fmul = Felt::zero();
+        fmul(&res, &x, &mut res_fmul);
+        let mut res_add = Felt::zero();
+        fadd(&res_fmul, &res_lift, &mut res_add);
+
+        if is_hoon_list_end(& p_cell.tail()) {
+            return (felt_as_noun(stack, res_add))
+        }
+
+        res = res_add;
+        p = p_cell.tail();
+    }
 }
 

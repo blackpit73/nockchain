@@ -174,7 +174,7 @@ pub fn snag_one_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr
     snag_one(stack, mary_noun, i)
 }
 
-
+// snag from ave
 pub fn snag_one(stack: &mut NockStack, mary_noun: Noun, i: usize) -> Result<Noun, JetErr> {
     let mary_cell = mary_noun.as_cell()?;
     let ma_step = mary_cell.head().as_atom()?.as_u32()?;
@@ -182,7 +182,12 @@ pub fn snag_one(stack: &mut NockStack, mary_noun: Noun, i: usize) -> Result<Noun
     let ma_dat: Atom = mary_cell.tail().as_cell()?.tail().as_atom()?;
 
     assert!(i < ma_len as usize);
+    snag_one_fields(stack, i, ma_step, ma_dat)
+}
 
+
+// snag from ave with separate fields
+pub fn snag_one_fields(stack: &mut NockStack, i: usize, ma_step: u32, ma_dat: Atom) -> Result<Noun, JetErr> {
     let res = cut(stack, 6, i * ma_step as usize, ma_step as usize, ma_dat)?;
     if ma_step == 1 { return Ok(res); }
     let high_bit = lsh(stack, 0, bex(6) * ma_step as usize, D(1).as_atom()?)?;
@@ -368,6 +373,10 @@ pub fn mary_to_list(stack: &mut NockStack, ma_noun: Noun) -> Result<Noun, JetErr
     let (ma_step, ma_array_len, ma_array_dat) = get_mary_fields(ma_noun)?;
     let ma_step = ma_step.as_u64()? as usize;
 
+    mary_to_list_fields(stack, ma_array_len, ma_array_dat, ma_step)
+}
+
+pub fn mary_to_list_fields(stack: &mut NockStack, ma_array_len: Atom, ma_array_dat: Noun, ma_step: usize) -> Result<Noun, JetErr> {
     if ma_array_len.as_u64()? == 0 {
         return Ok(D(0));
     }
