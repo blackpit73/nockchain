@@ -1,15 +1,22 @@
+use num_traits::Zero;
 use nockvm::interpreter::Context;
+use nockvm::jets::bits::util::{lsh, rip};
+use nockvm::jets::list::util::{flop, snip};
+use nockvm::jets::math::util::add;
 use nockvm::jets::util::slot;
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
-use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
+use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
 
 use crate::form::math::bpoly::*;
 use crate::form::poly::*;
 use crate::hand::handle::*;
 use crate::hand::structs::HoonList;
+use crate::jets::fpntt_jets::{frep, frep_jet};
+use crate::jets::mary_jets::{get_mary_fields, lift_elt_jet, mary_to_list};
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::{AtomExt, NounExt};
+use crate::utils::{hoon_list_to_vecnoun, is_hoon_list_end, vecnoun_to_hoon_list};
 
 pub fn bpoly_to_list_jet(context: &mut Context, subject: Noun) -> Result {
     let stack = &mut context.stack;
@@ -250,3 +257,147 @@ pub fn init_bpoly(list_belt: HoonList, res_poly: &mut [Belt]) {
         res_poly[i] = belt;
     }
 }
+
+//-------------------------------------------------------------------------
+//
+
+
+
+
+
+
+//
+// ::  +bcan: gives the canonical leading-zero-stripped representation of p(x)
+// ++  bcan
+//   |=  p=poly
+//   ^-  poly
+//   =.  p  (flop p)
+//   |-
+//   ?~  p
+//     ::  TODO: fix this
+//     ~[0]
+//   ?:  =(i.p 0)
+//     $(p t.p) poly
+//   (flop p)
+// fn bcan(stack: &mut NockStack, p: Noun) -> Result {
+//     let mut p_vec : Vec<Noun> = hoon_list_to_vecnoun(p)?;
+//
+//     loop {
+//         let last = p_vec.last();
+//         if ! last.is_some() {
+//             break;
+//         }
+//
+//         let res64 = last.unwrap().as_atom()?.as_u64();
+//         if res64.is_err() {
+//             break; // larger than u64 --> not zero --> done
+//         }
+//
+//         if res64? != 0 {
+//             break;
+//
+//         }
+//
+//         p_vec.pop();
+//     }
+//
+//     let res = vecnoun_to_hoon_list(stack, p_vec.as_slice());
+//     Ok(res)
+// }
+
+//
+// // ++  bpcan
+// //   |=  bp=bpoly
+// //   ^-  bpoly
+// //   =/  p  ~(to-poly bop bp)
+// //   (init-bpoly (bcan p))
+// fn bpcan(stack: &mut NockStack, bpoly: Noun) -> Result {
+//     let ma = T(stack, &[D(1), bpoly]);
+//     let p = mary_to_list(stack, ma)?;
+//     let res_bcan = bcan(stack, p)?;
+//
+//     let list_belt = HoonList::try_from(res_bcan)?.into_iter();
+//     let count = list_belt.count();
+//     let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(count));
+//     init_bpoly(list_belt, res_poly);
+//
+//     let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
+//     Ok(res_cell)
+// }
+//
+
+
+// ++  bp-is-zero
+//   ~/  %bp-is-zero
+//   |=  p=bpoly
+//   ^-  ?
+//   ~+
+//   =.  p  (bpcan p)
+//   |(=(len.p 0) =(p zero-bpoly))
+pub fn bp_is_zero_jet(context: &mut Context, subject: Noun) -> Result {
+    let stack = &mut context.stack;
+    let p = slot(subject, 6)?;
+
+    let p_slice= BPolySlice::try_from(p)?;
+    if p_slice.is_zero() {
+        Ok(YES)
+    } else {
+        Ok(NO)
+    }
+}
+
+
+
+// ::  +lift: the unique lift of a base field element into an extension field
+// ++  lift
+//   |=  =belt
+//   ~+
+//   ^-  felt
+//   %-  frep
+//   :-  belt
+//   (reap (dec deg) 0)
+//
+// > (lift.two 1)
+// 0x1.0000.0000.0000.0000.0000.0000.0000.0000.0000.0000.0000.0001
+// > (lift.two 0)
+// 0x1.0000.0000.0000.0000.0000.0000.0000.0000.0000.0000.0000.0000
+
+// fn lift(stack: &mut NockStack, belt: Belt) -> Felt {
+//
+//     let x = hoon_list_to_vecbelt(sample)?;
+//     let felt = frep(x)?;
+//     felt_as_noun(context, felt)
+//
+// }
+
+
+// bpeval-lift: evaluate a bpoly at a felt
+pub fn bpeval_lift_jet(context: &mut Context, subject: Noun) -> Result {
+    let stack = &mut context.stack;
+    let sam = slot(subject, 6)?;
+    let [bp, x] = sam.uncell()?;
+
+    //lift
+
+    // ++  bpeval-lift
+    //   ~/  %bpeval-lift
+    //   |:  [bp=`bpoly`one-bpoly x=`felt`(lift 1)]
+    //   ^-  felt
+    //   ~+
+    //   ?:  (bp-is-zero bp)  (lift 0)
+    //   ?:  =(len.bp 1)  (lift (~(snag bop bp) 0))
+    //   =/  p  ~(to-poly bop bp)
+    //   =.  p  (flop p)
+    //   =/  res=@  (lift 0)
+    //   |-
+    //   ?~  p    !!
+    //   ?~  t.p
+    //     (fadd (fmul res x) (lift i.p))
+    //   ::  based on p(x) = (...((a_n)x + a_{n-1})x + a_{n-2})x + ... )
+    //   $(res (fadd (fmul res x) (lift i.p)), p t.p)
+
+
+
+    jet_err()
+}
+

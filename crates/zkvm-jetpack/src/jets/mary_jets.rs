@@ -2,8 +2,8 @@ use nockvm::interpreter::Context;
 use nockvm::jets::util::{bite_to_word, chop, slot};
 use nockvm::jets::JetErr;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
-use nockvm::jets::list::util::{lent, reap, weld, zing};
-use nockvm::jets::bits::util::{lsh};
+use nockvm::jets::list::util::{lent, reap, snip, weld, zing};
+use nockvm::jets::bits::util::{lsh, rip};
 use nockvm::jets::math::util::add;
 use nockvm::mem::NockStack;
 use tracing::{debug,error};
@@ -358,3 +358,36 @@ fn snag_as_digest(stack: &mut NockStack, m_noun: Noun, i: usize) -> Result<Noun,
     Ok(digest_to_noundigest(stack, digest))
 }
 
+pub fn mary_to_list_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let ma_noun = slot(subject, 6)?;
+    mary_to_list(stack, ma_noun)
+}
+
+pub fn mary_to_list(stack: &mut NockStack, ma_noun: Noun) -> Result<Noun, JetErr> {
+    let (ma_step, ma_array_len, ma_array_dat) = get_mary_fields(ma_noun)?;
+    let ma_step = ma_step.as_u64()? as usize;
+
+    if ma_array_len.as_u64()? == 0 {
+        return Ok(D(0));
+    }
+
+    let res_rip = rip(stack, 6, ma_step, ma_array_dat.as_atom()?)?;
+    let res_snip = snip(stack, res_rip)?;
+
+    let mut res_turn: Vec<Noun> = Vec::new();
+    for elem in HoonList::try_from(res_snip)?.into_iter() {
+        //%+  add  elem
+        //let x = elem +
+        let res_wutcol = if ma_step == 1 {
+            D(0)
+        } else {
+            lsh(stack, 6, ma_step, D(1).as_atom()?)?
+        };
+
+        let res_add = add(stack, elem.as_atom()?, res_wutcol.as_atom()?);
+        res_turn.push(res_add.as_noun());
+    };
+
+    Ok(vecnoun_to_hoon_list(stack, res_turn.as_slice()))
+}
