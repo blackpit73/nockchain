@@ -8,7 +8,7 @@ use nockvm::mem::NockStack;
 use crate::form::math::base::*;
 use crate::form::poly::*;
 use crate::jets::utils::*;
-
+use crate::utils::is_hoon_list_end;
 // base field jets
 //
 // When possible, all these functions do is get the sample from the subject,
@@ -123,7 +123,7 @@ pub fn rip_correct(stack: &mut NockStack, bloq: usize, step: usize, b: Atom) -> 
 pub fn levy_based(a_noun: Noun) -> bool {
     let mut list = a_noun;
     loop {
-        if unsafe { list.raw_equals(&D(0)) } {
+        if is_hoon_list_end(&list) {
             return true;
         }
         let cell = list.as_cell().expect("cell not found");

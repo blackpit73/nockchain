@@ -17,7 +17,7 @@ const DEG:u64 = 3; // field extension degree
 
 
 // frep: inverse of frip; list of belts are rep'd to a felt
-fn frep(x: Vec<Belt>) -> Result<Felt, JetErr> {
+pub fn frep(x: Vec<Belt>) -> Result<Felt, JetErr> {
     assert_eq!(x.len() as u64, DEG);
     assert_all_based(&x);
     Ok(felt_from_u64s(x[0].0,x[1].0,x[2].0))

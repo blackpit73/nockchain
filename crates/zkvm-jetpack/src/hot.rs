@@ -983,6 +983,36 @@ pub const ZTD_JETS: &[HotEntry] = &[
         1,
         hash_hashable_jet,
     ),
+
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"mary-to-list"),
+        ],
+        1,
+        mary_to_list_jet,
+    ),
+
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"bp-is-zero"),
+        ],
+        1,
+        bp_is_zero_jet,
+    ),
 ];
 
 pub const KEYGEN_JETS: &[HotEntry] = &[(
