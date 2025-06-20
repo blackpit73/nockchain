@@ -1,7 +1,7 @@
 use nockvm::interpreter::Context;
 use nockvm::jets::util::slot;
 use nockvm::jets::JetErr;
-use nockvm::noun::{Noun, D, T};
+use nockvm::noun::{Noun, T};
 
 use crate::based;
 use crate::form::math::tip5::*;
@@ -50,7 +50,7 @@ pub fn permutation_jet(context: &mut Context, subject: Noun) -> Result<Noun, Jet
 
 
 // assert that input is made of base field elements
-pub fn tip5_assert_all_based(vecbelt: &Vec<Belt>) {
+pub fn assert_all_based(vecbelt: &Vec<Belt>) {
     vecbelt.iter().for_each(|b| {based!(b.0)});
 }
 
@@ -120,10 +120,10 @@ pub fn hash_varlen_jet(context: &mut Context, subject: Noun) -> Result<Noun, Jet
 }
 
 fn hash_varlen(mut input_vec: &mut Vec<Belt>) -> [u64; 5] {
-    let mut sponge = [0u64; STATE_SIZE];
+    let mut sponge = create_init_sponge_variable();
 
     // assert that input is made of base field elements
-    tip5_assert_all_based(&input_vec);
+    assert_all_based(&input_vec);
 
     // pad input with ~[1 0 ... 0] to be a multiple of rate
     let (q, r) = tip5_calc_q_r(&input_vec);
@@ -140,6 +140,13 @@ fn hash_varlen(mut input_vec: &mut Vec<Belt>) -> [u64; 5] {
     digest
 }
 
+pub fn create_init_sponge_variable() -> [u64; STATE_SIZE] {
+    [0u64; STATE_SIZE]
+}
+pub fn create_init_sponge_fixed() -> [u64; STATE_SIZE] {
+    [0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64,
+    4294967295u64, 4294967295u64, 4294967295u64, 4294967295u64, 4294967295u64, 4294967295u64]
+}
 
 pub fn montify_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let stack = &mut context.stack;
@@ -242,6 +249,47 @@ fn digest_to_noundigest(stack: &mut NockStack, digest: [u64; 5]) -> Noun {
 
     T(stack, &[n0, n1, n2, n3, n4])
 }
+
+
+  // ::  +hash-10: hash list of 10 belts into a list of 5 belts
+  // ++  hash-10
+  //   ~/  %hash-10
+  //   |=  input=(list belt)
+  //   ::  output length is 5
+  //   ^-  (list belt)
+  //   ?>  =((lent input) rate)
+  //   ?>  (levy input based)
+  //   =.  input   (turn input montify)
+  //   =/  sponge  (init-tip5-state %fixed)
+  //   =.  sponge  (permutation (weld input (slag rate sponge)))
+  //   (turn (scag digest-length sponge) mont-reduction)
+
+pub fn hash_10_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let input = slot(subject, 6)?;
+    let mut input_vec = hoon_list_to_vecbelt(input)?;
+
+    // check input
+    let (q, r) = tip5_calc_q_r(&input_vec);
+    assert_eq!(q, 1);
+    assert_eq!(r, 0);
+    assert_all_based(&input_vec);
+
+    // bring input into montgomery space
+    tip5_montify_vecbelt(&mut input_vec);
+
+    // create init sponge (%fixed)
+    let mut sponge = create_init_sponge_fixed();
+
+    // process input (q=1, so one batch only)
+    //tip5_absorb_input(&mut input_vec, &mut sponge, q);
+    tip5_absorb_rate(&mut sponge, input_vec.as_slice());
+
+    //  calc digest
+    let digest = tip5_calc_digest(&sponge);
+    Ok(vec_to_hoon_list(context, &digest))
+}
+
+
 
 #[cfg(test)]
 mod tests {
