@@ -48,56 +48,60 @@ pub fn permutation_jet(context: &mut Context, subject: Noun) -> Result<Noun, Jet
     Ok(new_sponge)
 }
 
+
+
 // assert that input is made of base field elements
-pub fn assert_all_based(vecbelt: &Vec<Belt>) {
+pub fn tip5_assert_all_based(vecbelt: &Vec<Belt>) {
     vecbelt.iter().for_each(|b| {based!(b.0)});
 }
 
-
-pub fn hash_varlen_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-    let input = slot(subject, 6)?;
-    let mut input_vec = hoon_list_to_vecbelt(input)?;
-    let mut sponge = [0u64; STATE_SIZE];
-
-    // assert that input is made of base field elements
-    input_vec.iter().for_each(|b| {based!(b.0)});
-
-    // pad input with ~[1 0 ... 0] to be a multiple of rate
-    let lent_input = lent(input)?;
+// calc q and r for vecbelt, based on RATE
+pub fn tip5_calc_q_r(input_vec: &Vec<Belt>) -> (usize, usize) {
+    let lent_input = input_vec.len();
     let (q, r) = (lent_input / RATE, lent_input % RATE);
+    (q, r)
+}
+
+// pad vecbelt with ~[1 0 ... 0] to be a multiple of rate
+pub fn tip5_pad_vecbelt(input_vec: &mut Vec<Belt>, r: usize) {
     input_vec.push(Belt(1));
     for _i in 0..(RATE - r) - 1 {
         input_vec.push(Belt(0));
     }
+}
 
-    // bring input into montgomery space
-    let mut input_montiplied: Vec<Belt> = vec![Belt(0); input_vec.len()];
+// monitify vecbelt (bring into montgomery space)
+pub fn tip5_montify_vecbelt(input_vec: &mut Vec<Belt>) {
     for i in 0..input_vec.len() {
-        input_montiplied[i] = montify(input_vec[i]);
+        input_vec[i] = montify(input_vec[i]);
     }
+}
 
-    // process input in batches of size RATE
-    let mut cnt_q=q;
-    let mut input_to_absorb = input_montiplied.as_slice();
-    loop {
-        let (scag_input, slag_input) = input_to_absorb.split_at(RATE);
-        absorb_rate(&mut sponge, scag_input);
-
-        if cnt_q==0 { break; }
-        cnt_q=cnt_q-1;
-        input_to_absorb =  slag_input;
-    }
-
-    // calc digest
+// calc digest
+pub fn tip5_calc_digest(sponge: &[u64; 16]) -> [u64; 5] {
     let mut digest = [0u64; DIGEST_LENGTH];
     for i in 0..DIGEST_LENGTH {
         digest[i] = mont_reduction(sponge[i] as u128).0;
     }
-
-    Ok(vec_to_hoon_list(context, &digest))
+    digest
 }
 
-fn absorb_rate(sponge: &mut[u64; 16], input: &[Belt]) {
+// absorb complete input
+pub fn tip5_absorb_input(input_vec: &mut Vec<Belt>, mut sponge: &mut [u64; 16], q: usize) {
+    let mut cnt_q = q;
+    let mut input_to_absorb = input_vec.as_slice();
+    loop {
+        let (scag_input, slag_input) = input_to_absorb.split_at(RATE);
+        tip5_absorb_rate(&mut sponge, scag_input);
+
+        if cnt_q == 0 { break; }
+        cnt_q = cnt_q - 1;
+        input_to_absorb = slag_input;
+    }
+}
+
+// absorb one part of input (size RATE)
+pub fn tip5_absorb_rate(sponge: &mut[u64; 16], input: &[Belt]) {
     assert_eq!(input.len(), RATE);
 
     for copy_pos in 0..RATE {
@@ -106,6 +110,31 @@ fn absorb_rate(sponge: &mut[u64; 16], input: &[Belt]) {
 
     permute(sponge);
 }
+
+pub fn hash_varlen_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let input = slot(subject, 6)?;
+    let mut input_vec = hoon_list_to_vecbelt(input)?;
+    let mut sponge = [0u64; STATE_SIZE];
+
+    // assert that input is made of base field elements
+    tip5_assert_all_based(&input_vec);
+
+    // pad input with ~[1 0 ... 0] to be a multiple of rate
+    let (q, r) = tip5_calc_q_r(&input_vec);
+    tip5_pad_vecbelt(&mut input_vec, r);
+
+    // bring input into montgomery space
+    tip5_montify_vecbelt(&mut input_vec);
+
+    // process input in batches of size RATE
+    tip5_absorb_input(&mut input_vec, &mut sponge, q);
+
+    // calc digest
+    let digest = tip5_calc_digest(&sponge);
+
+    Ok(vec_to_hoon_list(context, &digest))
+}
+
 
 
 
@@ -193,6 +222,37 @@ fn mont_reduction(x: u128) -> Belt {
 
     Belt(res as u64)
 }
+
+
+pub fn hash_belts_list_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let input = slot(subject, 6)?;
+    let input_vec = hoon_list_to_vecbelt(input)?;
+
+    // ++  hash-belts-list
+    //   ~/  %hash-belts-list
+    //   |=  belts=(list belt)
+    //   ^-  noun-digest:tip5
+
+    // tishep: Combine a new noun with the subject, inverted.
+    //   =-  ?>  ?=(noun-digest -)  -
+    //   %-  list-to-tuple
+    //   (hash-varlen belts)
+
+    // ::  +list-to-tuple: strips ~ from a list and yields a tuple
+    // ::
+    // ::    hash-10 returns a length=5 list and this function is useful
+    // ::    for converting it to a tuple
+    // ++  list-to-tuple
+    //   ~/  %list-to-tuple
+    //   |=  lis=(list @)
+    //   ::  address of [a_{k-1} ~] (final nontrivial tail of list)
+    //   =+  (dec (bex (lent lis)))
+    //   .*  lis
+    //   [10 [- [0 (mul 2 -)]] [0 1]]
+
+    jet_err()
+}
+
 
 #[cfg(test)]
 mod tests {
