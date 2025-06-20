@@ -1,11 +1,9 @@
 use either::{Left, Right};
-use nockvm::interpreter::Context;
 use nockvm::jets::JetErr;
 use nockvm::noun::{Noun, D};
 
 use crate::form::fext::*;
 use crate::form::{Belt, Felt};
-use crate::utils::vec_to_hoon_list;
 
 #[derive(Copy, Clone)]
 pub struct TreeData {
@@ -81,22 +79,4 @@ pub fn build_tree_data(noun: Noun, alf: &Felt) -> Result<TreeData, JetErr> {
         dyck,
         n: noun,
     })
-}
-
-pub fn leaf_sequence(context: &mut Context, sample: Noun) -> Result<Noun, JetErr> {
-    let mut leaf: Vec<u64> = Vec::<u64>::new();
-    do_leaf_sequence(sample, &mut leaf)?;
-    Ok(vec_to_hoon_list(&mut context.stack, &leaf))
-}
-
-fn do_leaf_sequence(noun: Noun, vec: &mut Vec<u64>) -> Result<(), JetErr> {
-    if noun.is_atom() {
-        vec.push(noun.as_atom()?.as_u64()?);
-        Ok(())
-    } else {
-        let cell = noun.as_cell()?;
-        do_leaf_sequence(cell.head(), vec)?;
-        do_leaf_sequence(cell.tail(), vec)?;
-        Ok(())
-    }
 }
