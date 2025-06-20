@@ -26,6 +26,21 @@ pub fn vec_to_hoon_list(stack: &mut NockStack, vec: &[u64]) -> Noun {
     list
 }
 
+pub fn vec_to_hoon_tuple(stack: &mut NockStack, vec: &[u64]) -> Noun {
+    assert!( vec.len()>=2);
+    let mut list = NONE;
+    for e in vec.iter().rev() {
+        let n = Atom::new(stack, *e).as_noun();
+        list = if list.is_none() {
+            n
+        } else {
+            T(stack, &[n, list])
+        }
+    }
+    list
+}
+
+
 pub fn vecnoun_to_hoon_tuple(stack: &mut NockStack, vec: &[Noun]) -> Noun {
     assert!( vec.len()>=2);
     let mut list = NONE;

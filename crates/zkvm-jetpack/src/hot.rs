@@ -12,8 +12,9 @@ use crate::jets::mega_jets::*;
 use crate::jets::memory_table_jets::*;
 use crate::jets::tip5_jets::*;
 use crate::jets::verifier_jets::*;
-use crate::jets::fpntt_jets::*;
 use crate::jets::tip5_sponge::*;
+use crate::jets::fpntt_jets::*;
+use crate::jets::shape_jets::*;
 
 pub fn produce_prover_hot_state() -> Vec<HotEntry> {
     let mut jets: Vec<HotEntry> = Vec::new();
@@ -829,6 +830,23 @@ pub const ZTD_JETS: &[HotEntry] = &[
         ],
         1,
         sponge_squeeze_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"shape"),
+            Left(b"leaf-sequence"),
+        ],
+        1,
+        leaf_sequence_jet, // ('misc-lib', 'shape', 'leaf-sequence')
     ),
 ];
 
