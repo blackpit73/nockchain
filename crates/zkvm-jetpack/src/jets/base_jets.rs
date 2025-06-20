@@ -154,7 +154,7 @@ pub fn based_noun_jet(_context: &mut Context, subject: Noun) -> Result {
 
 pub fn based_noun(n: Noun) -> bool {
     if n.is_atom() {
-        return based_one(n);
+        return based(n);
     }
 
     let n_cell = n.as_cell().unwrap();
