@@ -1,6 +1,6 @@
 // Utility functions and commonly used re-exports
 use nockvm::interpreter::Context;
-use nockvm::noun::{Atom, IndirectAtom, DIRECT_MAX, Noun, D, T};
+use nockvm::noun::{Atom, IndirectAtom, DIRECT_MAX, Noun, D, T, NONE};
 use nockvm::mem::NockStack;
 use nockvm::jets::JetErr;
 
@@ -27,6 +27,21 @@ pub fn vec_to_hoon_list(context: &mut Context, vec: &[u64]) -> Noun {
     }
     list
 }
+
+pub fn vecnoun_to_hoon_tuple(context: &mut Context, vec: &[Noun]) -> Noun {
+    assert!( vec.len()>=2);
+    let mut list = NONE;
+    for n in vec.iter().rev() {
+        list = if list.is_none() {
+            *n
+        } else {
+            T(&mut context.stack, &[*n, list])
+        }
+    }
+    list
+}
+
+
 
 // convert bitslice to u128 (check with fits_in_u128 before, if you don't know size)
 pub fn bitslice_to_u128(bits: &BitSlice<u64, Lsb0>) -> u128 {
