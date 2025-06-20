@@ -12,6 +12,7 @@ use crate::jets::mega_jets::*;
 use crate::jets::memory_table_jets::*;
 use crate::jets::tip5_jets::*;
 use crate::jets::verifier_jets::*;
+use crate::jets::fpntt_jets::*;
 
 pub fn produce_prover_hot_state() -> Vec<HotEntry> {
     let mut jets: Vec<HotEntry> = Vec::new();
@@ -200,50 +201,6 @@ pub const XTRA_JETS: &[HotEntry] = &[
             Left(b"qua"),
             Left(b"pen"),
             Left(b"zeke"),
-            Left(b"transpose-bpolys"),
-        ],
-        1,
-        transpose_bpolys_jet,
-    ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ave"),
-            Left(b"snag"),
-        ],
-        1,
-        snag_one_jet,
-    ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ave"),
-            Left(b"snag-as-bpoly"),
-        ],
-        1,
-        snag_as_bpoly_jet,
-    ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
             Left(b"rip-correct")
         ],
         1,
@@ -292,6 +249,50 @@ pub const XTRA_JETS: &[HotEntry] = &[
         ],
         1,
         lift_elt_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"transpose-bpolys"),
+        ],
+        1,
+        transpose_bpolys_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ave"),
+            Left(b"snag"),
+        ],
+        1,
+        snag_one_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ave"),
+            Left(b"snag-as-bpoly"),
+        ],
+        1,
+        snag_as_bpoly_jet,
     ),
 ];
 
@@ -460,6 +461,21 @@ pub const EXTENSION_FIELD_JETS: &[HotEntry] = &[
         ],
         1,
         fpow_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"frep"),
+        ],
+        1,
+        frep_jet,
     ),
 ];
 

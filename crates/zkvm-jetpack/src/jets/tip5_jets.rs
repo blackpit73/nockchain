@@ -48,6 +48,12 @@ pub fn permutation_jet(context: &mut Context, subject: Noun) -> Result<Noun, Jet
     Ok(new_sponge)
 }
 
+// assert that input is made of base field elements
+pub fn assert_all_based(vecbelt: &Vec<Belt>) {
+    vecbelt.iter().for_each(|b| {based!(b.0)});
+}
+
+
 pub fn hash_varlen_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let input = slot(subject, 6)?;
     let mut input_vec = hoon_list_to_vecbelt(input)?;
@@ -100,6 +106,7 @@ fn absorb_rate(sponge: &mut[u64; 16], input: &[Belt]) {
 
     permute(sponge);
 }
+
 
 
 
