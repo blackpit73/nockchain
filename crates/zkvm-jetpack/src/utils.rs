@@ -1,14 +1,12 @@
-// Utility functions and commonly used re-exports
-use nockvm::interpreter::Context;
-use nockvm::noun::{Atom, IndirectAtom, DIRECT_MAX, Noun, D, T, NONE};
-use nockvm::mem::NockStack;
 use nockvm::jets::JetErr;
+use nockvm::mem::NockStack;
+use nockvm::noun::{Atom, IndirectAtom, Noun, D, DIRECT_MAX, NONE, T};
 
-use crate::form::{Belt};
+use crate::form::Belt;
 
-pub use tracing::{debug, trace};
 use bitvec::prelude::{BitSlice, Lsb0};
 use ibig::UBig;
+pub use tracing::{debug, trace};
 
 
 // tests whether a felt atom has the leading 1. we cannot actually test
@@ -19,23 +17,23 @@ pub fn felt_atom_is_valid(felt_atom: IndirectAtom) -> bool {
 }
 
 
-pub fn vec_to_hoon_list(context: &mut Context, vec: &[u64]) -> Noun {
+pub fn vec_to_hoon_list(stack: &mut NockStack, vec: &[u64]) -> Noun {
     let mut list = D(0);
     for e in vec.iter().rev() {
-        let n = Atom::new(&mut context.stack, *e).as_noun();
-        list = T(&mut context.stack, &[n, list]);
+        let n = Atom::new(stack, *e).as_noun();
+        list = T(stack, &[n, list]);
     }
     list
 }
 
-pub fn vecnoun_to_hoon_tuple(context: &mut Context, vec: &[Noun]) -> Noun {
+pub fn vecnoun_to_hoon_tuple(stack: &mut NockStack, vec: &[Noun]) -> Noun {
     assert!( vec.len()>=2);
     let mut list = NONE;
     for n in vec.iter().rev() {
         list = if list.is_none() {
             *n
         } else {
-            T(&mut context.stack, &[*n, list])
+            T(stack, &[*n, list])
         }
     }
     list

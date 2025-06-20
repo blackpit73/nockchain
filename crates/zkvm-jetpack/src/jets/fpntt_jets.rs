@@ -47,6 +47,7 @@ pub fn frep_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     felt_as_noun(context, felt)
 }
 
+
 pub fn fp_ntt(fp: &[Felt], root: &Felt) -> Vec<Felt> {
     let n = fp.len() as u32;
 
@@ -109,7 +110,7 @@ pub fn fp_ntt_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> 
 
     let returned_fpoly = fp_ntt(fp.0, root);
     let (res_atom, res_poly): (IndirectAtom, &mut [Felt]) =
-        new_handle_mut_slice(&mut context.stack, Some(returned_fpoly.len() as usize));
+        new_handle_mut_slice(&mut context.stack, Some(returned_fpoly.len()));
     res_poly.copy_from_slice(&returned_fpoly[..]);
 
     let res_cell: Noun = finalize_poly(&mut context.stack, Some(res_poly.len()), res_atom);
@@ -120,6 +121,7 @@ pub fn fp_ntt_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::u128_as_noun;
     use nockvm::jets::util::test::*;
     use nockvm::noun::{D, T};
 

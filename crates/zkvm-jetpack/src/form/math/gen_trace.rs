@@ -86,7 +86,7 @@ pub fn build_tree_data(noun: Noun, alf: &Felt) -> Result<TreeData, JetErr> {
 pub fn leaf_sequence(context: &mut Context, sample: Noun) -> Result<Noun, JetErr> {
     let mut leaf: Vec<u64> = Vec::<u64>::new();
     do_leaf_sequence(sample, &mut leaf)?;
-    Ok(vec_to_hoon_list(context, &leaf))
+    Ok(vec_to_hoon_list(&mut context.stack, &leaf))
 }
 
 fn do_leaf_sequence(noun: Noun, vec: &mut Vec<u64>) -> Result<(), JetErr> {

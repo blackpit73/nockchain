@@ -1,15 +1,13 @@
-// ++  sponge
-//   ~%  %sponge  +>  ~
-//   |_  sponge=tip5-state
 
-use crate::jets::tip5_jets::{assert_all_based, hoon_list_to_sponge, tip5_absorb_input, tip5_calc_q_r, tip5_montify_vecbelt, tip5_pad_vecbelt};
-use crate::utils::{hoon_list_to_vecbelt, vec_to_hoon_list};
+use crate::jets::tip5_jets::*;
+use crate::utils::*;
 use bitvec::prelude::{BitSlice, Lsb0};
 use nockvm::interpreter::Context;
 use nockvm::jets::util::slot;
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
-use nockvm::noun::{Cell, Noun};
+use nockvm::noun::{Cell, Noun, T};
+use crate::form::tip5::{permute, RATE};
 
 // edit door values
 fn door_edit(
@@ -59,6 +57,7 @@ fn door_edit(
 }
 
 pub fn sponge_absorb_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
     let input_noun = slot(subject, 6)?;
     let door = slot(subject, 7)?;
     let sponge_noun = slot(door, 6)?;
@@ -80,8 +79,8 @@ pub fn sponge_absorb_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
     tip5_absorb_input(&mut input_vec, &mut sponge, q);
 
     // update sponge in door
-    let new_sponge = vec_to_hoon_list(context, &sponge);
-    let edit = door_edit(&mut context.stack, 6, new_sponge, door);
+    let new_sponge = vec_to_hoon_list(stack, &sponge);
+    let edit = door_edit(stack, 6, new_sponge, door);
     
     Ok(edit)
 }
@@ -105,29 +104,25 @@ pub fn sponge_absorb_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
 //     Ok(edit)
 // }
 
-//   ++  squeeze
-//     ~%  %squeeze  +  ~
-//     |.  ^+  [*(list belt) +.$]
-//     =*  rng  +.$
-//     ::  squeeze out the full rate and bring out of montgomery space
-//     =/  output  (turn (scag rate sponge) mont-reduction)
-//     =.  sponge  $:permute
-//     [output rng]
-//   --
-// pub fn sponge_squeeze_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-//     let door = slot(subject, 7)?;
-//     let sponge_noun = slot(door, 6)?;
-//     let sponge = hoon_list_to_sponge(sponge_noun)?;
-//
-//     // calc digest
-//     //let digest = tip5_calc_digest(&sponge);
-//
-//     let mut digest = [0u64; DIGEST_LENGTH];
-//     for i in 0..DIGEST_LENGTH {
-//         digest[i] = mont_reduction(sponge[i] as u128).0;
-//     }
-//     digest
-//
-//
-//     Ok(vec_to_hoon_list(context, &digest))
-// }
+// squeeze out the full rate and bring out of montgomery space
+pub fn sponge_squeeze_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let door = slot(subject, 3)?;
+    let sponge_noun = slot(door, 6)?;
+    let mut sponge = hoon_list_to_sponge(sponge_noun)?;
+
+    let mut output = [0u64; RATE];
+    for i in 0..RATE {
+        output[i] = mont_reduction(sponge[i] as u128).0;
+    }
+
+    permute(&mut sponge);
+
+    // update sponge in door
+    let new_sponge = vec_to_hoon_list(stack, &sponge);
+    let edit = door_edit(stack, 6, new_sponge, door);
+
+    let output_noun = vec_to_hoon_list(stack, &output);
+    let res = T( stack, &[ output_noun, edit ]);
+    Ok(res)
+}

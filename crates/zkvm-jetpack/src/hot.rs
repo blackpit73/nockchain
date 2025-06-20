@@ -812,27 +812,24 @@ pub const ZTD_JETS: &[HotEntry] = &[
         1,
         hash_10_jet,
     ),
-    //
-    //TODO
-    //
-    // (
-    //     &[
-    //         K_138,
-    //         Left(b"one"),
-    //         Left(b"two"),
-    //         Left(b"tri"),
-    //         Left(b"qua"),
-    //         Left(b"pen"),
-    //         Left(b"zeke"),
-    //         Left(b"ext-field"),
-    //         Left(b"misc-lib"),
-    //         Left(b"tip5-lib"),
-    //         Left(b"sponge"),
-    //         Left(b"permute"),
-    //     ],
-    //     1,
-    //     sponge_permute_jet,
-    // ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"tip5-lib"),
+            Left(b"sponge"),
+            Left(b"squeeze"),
+        ],
+        1,
+        sponge_squeeze_jet,
+    ),
 ];
 
 pub const KEYGEN_JETS: &[HotEntry] = &[(
