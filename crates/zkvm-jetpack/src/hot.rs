@@ -778,6 +778,26 @@ pub const ZTD_JETS: &[HotEntry] = &[
         1,
         sponge_absorb_jet,
     ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"tip5-lib"),
+            Left(b"hash-belts-list"),
+        ],
+        1,
+        hash_belts_list_jet,
+    ),
+    //
+    //TODO
+    //
     // (
     //     &[
     //         K_138,

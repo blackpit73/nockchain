@@ -122,19 +122,19 @@ pub fn sponge_absorb_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
 //     |.  ^+  sponge
 //     (permutation sponge)
 //   ::
-pub fn sponge_permute_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-    let door = slot(subject, 7)?;
-    let sponge_noun = slot(door, 6)?;
-    let mut sponge = hoon_list_to_sponge(sponge_noun)?;
-
-    permute(&mut sponge);
-
-    // update sponge in door
-    let new_sponge = vec_to_hoon_list(context, &sponge);
-    let edit = door_edit(&mut context.stack, 6, new_sponge, door);
-    
-    Ok(edit)
-}
+// pub fn sponge_permute_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+//     let door = slot(subject, 7)?;
+//     let sponge_noun = slot(door, 6)?;
+//     let mut sponge = hoon_list_to_sponge(sponge_noun)?;
+// 
+//     permute(&mut sponge);
+// 
+//     // update sponge in door
+//     let new_sponge = vec_to_hoon_list(context, &sponge);
+//     let edit = door_edit(&mut context.stack, 6, new_sponge, door);
+//     
+//     Ok(edit)
+// }
 
 //   ++  squeeze
 //     ~%  %squeeze  +  ~
@@ -145,13 +145,20 @@ pub fn sponge_permute_jet(context: &mut Context, subject: Noun) -> Result<Noun, 
 //     =.  sponge  $:permute
 //     [output rng]
 //   --
-pub fn sponge_squeeze_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-    let door = slot(subject, 7)?;
-    let sponge_noun = slot(door, 6)?;
-    let sponge = hoon_list_to_sponge(sponge_noun)?;
-
-    // calc digest
-    let digest = tip5_calc_digest(&sponge);
-
-    Ok(vec_to_hoon_list(context, &digest))
-}
+// pub fn sponge_squeeze_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+//     let door = slot(subject, 7)?;
+//     let sponge_noun = slot(door, 6)?;
+//     let sponge = hoon_list_to_sponge(sponge_noun)?;
+// 
+//     // calc digest
+//     //let digest = tip5_calc_digest(&sponge);
+//     
+//     let mut digest = [0u64; DIGEST_LENGTH];
+//     for i in 0..DIGEST_LENGTH {
+//         digest[i] = mont_reduction(sponge[i] as u128).0;
+//     }
+//     digest
+//     
+// 
+//     Ok(vec_to_hoon_list(context, &digest))
+// }
