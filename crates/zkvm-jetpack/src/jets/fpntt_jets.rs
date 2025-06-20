@@ -1,11 +1,16 @@
-use crate::form::{Belt, Felt};
+use crate::form::bpoly::bitreverse;
+use crate::form::fext::fpow;
+use crate::form::{Belt, FPolySlice, Felt, Poly};
+use crate::hand::handle::{finalize_poly, new_handle_mut_slice};
 use crate::jets::tip5_jets::assert_all_based;
+use crate::jets::utils::jet_err;
+use crate::noun::noun_ext::NounExt;
 use crate::utils::hoon_list_to_vecbelt;
 use ibig::UBig;
 use nockvm::interpreter::Context;
 use nockvm::jets::util::slot;
 use nockvm::jets::JetErr;
-use nockvm::noun::{Atom, Noun};
+use nockvm::noun::{Atom, IndirectAtom, Noun};
 use std::ops::{BitOr, Shl};
 
 const DEG:u64 = 3; // field extension degree
@@ -40,6 +45,75 @@ pub fn frep_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let x = hoon_list_to_vecbelt(sample)?;
     let felt = frep(x)?;
     felt_as_noun(context, felt)
+}
+
+pub fn fp_ntt(fp: &[Felt], root: &Felt) -> Vec<Felt> {
+    let n = fp.len() as u32;
+
+    if n == 1 {
+        return vec![fp[0]];
+    }
+
+    debug_assert!(n.is_power_of_two());
+
+    let log_2_of_n = n.ilog2();
+
+    const FELT0: Felt = Felt([Belt(0), Belt(0), Belt(0)]);
+    const FELT1: Felt = Felt([Belt(1), Belt(0), Belt(0)]);
+
+    let mut x: Vec<Felt> = vec![FELT0; n as usize];
+    x.copy_from_slice(fp);
+
+    for k in 0..n {
+        let rk = bitreverse(k, log_2_of_n);
+        if k < rk {
+            x.swap(rk as usize, k as usize);
+        }
+    }
+
+    let mut m = 1;
+    for _ in 0..log_2_of_n {
+        let mut w_m: Felt = Default::default();
+        fpow(root, (n / (2 * m)) as u64, &mut w_m);
+
+        let mut k = 0;
+        while k < n {
+            let mut w = FELT1;
+
+            for j in 0..m {
+                let u: Felt = x[(k + j) as usize];
+                let v: Felt = x[(k + j + m) as usize] * w;
+                x[(k + j) as usize] = u + v;
+                x[(k + j + m) as usize] = u - v;
+                w = w * w_m;
+            }
+
+            k += 2 * m;
+        }
+
+        m *= 2;
+    }
+    x
+}
+
+
+
+
+pub fn fp_ntt_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let sample = slot(subject, 6)?;
+    let [fp_noun, root_noun] = sample.uncell()?;
+
+    let (Ok(fp), Ok(root)) = (FPolySlice::try_from(fp_noun), root_noun.as_felt()) else {
+        return jet_err();
+    };
+
+    let returned_fpoly = fp_ntt(fp.0, root);
+    let (res_atom, res_poly): (IndirectAtom, &mut [Felt]) =
+        new_handle_mut_slice(&mut context.stack, Some(returned_fpoly.len() as usize));
+    res_poly.copy_from_slice(&returned_fpoly[..]);
+
+    let res_cell: Noun = finalize_poly(&mut context.stack, Some(res_poly.len()), res_atom);
+    Ok(res_cell)
 }
 
 
