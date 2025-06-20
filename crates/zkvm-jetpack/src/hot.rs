@@ -882,6 +882,23 @@ pub const ZTD_JETS: &[HotEntry] = &[
         1,
         hash_ten_cell_jet,
     ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"tip5-lib"),
+            Left(b"snag-as-digest"),
+        ],
+        1,
+        snag_as_digest_jet,
+    ),
 ];
 
 pub const KEYGEN_JETS: &[HotEntry] = &[(

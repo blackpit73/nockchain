@@ -2,21 +2,24 @@ use nockvm::interpreter::Context;
 use nockvm::jets::util::{bite_to_word, chop, slot};
 use nockvm::jets::JetErr;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
-use nockvm::jets::bits::util::lsh;
+use nockvm::jets::list::util::{lent, reap};
+use nockvm::jets::bits::util::{lsh, met};
 use nockvm::jets::math::util::add;
 use nockvm::mem::NockStack;
 use tracing::{debug,error};
 
-use nockvm::jets::list::util::{lent, reap};
 use crate::form::Belt;
 use crate::form::mary::*;
 use crate::form::math::mary::*;
+use crate::form::tip5::DIGEST_LENGTH;
 use crate::hand::handle::{finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice};
 use crate::hand::structs::HoonList;
 use crate::jets::base_jets::{levy_based, rip_correct};
 use crate::jets::bp_jets::init_bpoly;
+use crate::jets::tip5_jets::digest_to_noundigest;
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::AtomExt;
+use crate::utils::u128_as_noun;
 
 pub fn mary_swag_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let door = slot(subject, 7)?;
@@ -94,6 +97,44 @@ pub fn mary_transpose_jet(context: &mut Context, subject: Noun) -> Result<Noun, 
     Ok(res_cell)
 }
 
+pub fn lift_elt_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let door = slot(subject, 7)?;
+    let step = slot(door, 6)?.as_atom()?.as_u64()?;
+    let a = slot(subject, 6)?;
+
+    if step == 1u64 {
+        Ok(a)
+    } else {
+        let reap_res = reap(stack, step-1, D(0))?;
+        let init_bpoly_arg = T(stack, &[a, reap_res]);
+        let init_bpoly_arg_list = HoonList::try_from(init_bpoly_arg)?;
+
+        let count = init_bpoly_arg_list.count();
+        let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(count));
+        init_bpoly(init_bpoly_arg_list, res_poly);
+
+        let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
+        Ok(res_cell.as_cell()?.tail())
+    }
+}
+
+pub fn fet_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let door = slot(subject, 7)?;
+    let step = slot(door, 6)?.as_atom()?.as_u64()?;
+    let a = slot(subject, 6)?.as_atom()?;
+
+    let v = rip_correct(stack, 6, 1, a)?;
+
+    let lent_v = lent(v)? as u64;
+
+    if ((lent_v==1) && (step == 1)) || (lent_v==(step+1)) && levy_based(v) {
+        Ok(YES)
+    } else {
+        Ok(NO)
+    }
+}
 
 pub fn transpose_bpolys_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let sam = slot(subject, 6)?;
@@ -194,42 +235,59 @@ fn snag_as_bpoly(stack: &mut NockStack, mary_noun: Noun, i: usize) -> Result<Nou
 }
 
 
-pub fn lift_elt_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+
+
+pub fn do_bp_build_merk_heap_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let stack = &mut context.stack;
-    let door = slot(subject, 7)?;
-    let step = slot(door, 6)?.as_atom()?.as_u64()?;
-    let a = slot(subject, 6)?;
+    let sam = slot(subject, 6)?;
+    let m = MarySlice::try_from(sam).expect("cannot convert m arg");
 
-    if step == 1u64 {
-        Ok(a)
-    } else {
-        let reap_res = reap(stack, step-1, D(0))?;
-        let init_bpoly_arg = T(stack, &[a, reap_res]);
-        let init_bpoly_arg_list = HoonList::try_from(init_bpoly_arg)?;
+    // =/  heap-mary  (heapify-mary m)
+    let heap_mary : MarySlice = heapify_mary(m);
+    let xeb_m = met(0, u128_as_noun(stack, heap_mary.len as u128).as_atom()?); // TODO optimize
 
-        let count = init_bpoly_arg_list.count();
-        let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(count));
-        init_bpoly(init_bpoly_arg_list, res_poly);
+    // build heap_mary_noun
+    let (res, heap_mary_mut): (IndirectAtom, MarySliceMut) =
+        new_handle_mut_mary(stack, heap_mary.step as usize, heap_mary.len as usize);
+    heap_mary_mut.dat.copy_from_slice(&heap_mary.dat);
+    let heap_mary_noun = finalize_mary(stack, heap_mary.step as usize, heap_mary.len as usize, res);
 
-        let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
-        Ok(res_cell.as_cell()?.tail())
-    }
+    let snag_digest = snag_as_digest( stack, heap_mary_noun, 0)?;
+
+    let res1 = T(stack, &[ snag_digest, heap_mary_noun ]);
+    let res = T(stack, &[ D(xeb_m as u64), res1]);
+    Ok(res)
 }
 
-pub fn fet_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-    let stack = &mut context.stack;
-    let door = slot(subject, 7)?;
-    let step = slot(door, 6)?.as_atom()?.as_u64()?;
-    let a = slot(subject, 6)?.as_atom()?;
-
-    let v = rip_correct(stack, 6, 1, a)?;
-
-    let lent_v = lent(v)? as u64;
-
-    if ((lent_v==1) && (step == 1)) || (lent_v==(step+1)) && levy_based(v) {
-        Ok(YES)
-    } else {
-        Ok(NO)
-    }
+fn heapify_mary(m: MarySlice) -> MarySlice {
+    // |=  m=mary
+    // ^-  mary
+    m // TODO
 }
+
+
+pub fn snag_as_digest_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let sam = slot(subject, 6)?;
+    let m_noun = slot(sam, 2)?;
+    let i_noun = slot(sam, 3)?;
+
+    let i = i_noun.as_atom()?.as_u64()? as usize;
+    snag_as_digest( stack, m_noun, i)
+}
+
+fn snag_as_digest(stack: &mut NockStack, m_noun: Noun, i: usize) -> Result<Noun, JetErr>{
+    let buf = snag_one(stack, m_noun, i)?.as_atom()?;
+
+    let mut digest = [0u64; DIGEST_LENGTH];
+    digest[0] = cut(stack, 6, 0, 1, buf)?.as_atom()?.as_u64()?;
+    digest[1] = cut(stack, 6, 1, 1, buf)?.as_atom()?.as_u64()?;
+    digest[2] = cut(stack, 6, 2, 1, buf)?.as_atom()?.as_u64()?;
+    digest[3] = cut(stack, 6, 3, 1, buf)?.as_atom()?.as_u64()?;
+    digest[4] = cut(stack, 6, 4, 1, buf)?.as_atom()?.as_u64()?;
+
+    Ok(digest_to_noundigest(stack, digest))
+}
+
+
 

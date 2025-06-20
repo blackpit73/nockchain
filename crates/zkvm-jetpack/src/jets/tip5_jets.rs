@@ -243,7 +243,7 @@ pub fn hash_belts_list_jet(context: &mut Context, subject: Noun) -> Result<Noun,
     Ok(digest_to_noundigest(&mut context.stack, digest))
 }
 
-fn digest_to_noundigest(stack: &mut NockStack, digest: [u64; 5]) -> Noun {
+pub fn digest_to_noundigest(stack: &mut NockStack, digest: [u64; 5]) -> Noun {
     let n0 = belt_as_noun(stack, Belt(digest[0]));
     let n1 = belt_as_noun(stack, Belt(digest[1]));
     let n2 = belt_as_noun(stack, Belt(digest[2]));
@@ -321,7 +321,7 @@ pub fn hash_ten_cell_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
 
     //   |=  =ten-cell  :: [noun-digest noun-digest]
     //   ^-  noun-digest    :: [belt belt belt belt belt]
-    
+
     // leaf_sequence(ten-cell)
     let mut leaf: Vec<u64> = Vec::<u64>::new();
     do_leaf_sequence(ten_cell, &mut leaf)?;
@@ -331,6 +331,7 @@ pub fn hash_ten_cell_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
     let digest = hash_10(&mut leaf_belt);
     Ok(digest_to_noundigest(stack, digest))
 }
+
 
 
 #[cfg(test)]
