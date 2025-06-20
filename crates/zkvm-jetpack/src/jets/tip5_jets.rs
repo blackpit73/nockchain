@@ -38,11 +38,12 @@ pub fn hoon_list_to_sponge(list: Noun) -> Result<[u64; STATE_SIZE], JetErr> {
 
 
 pub fn permutation_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
     let sample = slot(subject, 6)?;
     let mut sponge = hoon_list_to_sponge(sample)?;
     permute(&mut sponge);
 
-    let new_sponge = vec_to_hoon_list(context, &sponge);
+    let new_sponge = vec_to_hoon_list(stack, &sponge);
 
     Ok(new_sponge)
 }
@@ -111,12 +112,13 @@ pub fn tip5_absorb_rate(sponge: &mut[u64; 16], input: &[Belt]) {
 }
 
 pub fn hash_varlen_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
     let input = slot(subject, 6)?;
     let mut input_vec = hoon_list_to_vecbelt(input)?;
 
     let digest = hash_varlen(&mut input_vec);
 
-    Ok(vec_to_hoon_list(context, &digest))
+    Ok(vec_to_hoon_list(stack, &digest))
 }
 
 fn hash_varlen(mut input_vec: &mut Vec<Belt>) -> [u64; 5] {
@@ -200,7 +202,7 @@ pub fn mont_reduction_jet(context: &mut Context, subject: Noun) -> Result<Noun, 
     Ok(belt_as_noun(&mut context.stack, mont_reduction(x_u128)))
 }
 
-fn mont_reduction(x: u128) -> Belt {
+pub fn mont_reduction(x: u128) -> Belt {
     // mont-reduction: computes x•r^{-1} = (xr^{-1} mod p).
     assert!(x < RP);
 
@@ -265,6 +267,7 @@ fn digest_to_noundigest(stack: &mut NockStack, digest: [u64; 5]) -> Noun {
   //   (turn (scag digest-length sponge) mont-reduction)
 
 pub fn hash_10_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
     let input = slot(subject, 6)?;
     let mut input_vec = hoon_list_to_vecbelt(input)?;
 
@@ -286,7 +289,7 @@ pub fn hash_10_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr>
 
     //  calc digest
     let digest = tip5_calc_digest(&sponge);
-    Ok(vec_to_hoon_list(context, &digest))
+    Ok(vec_to_hoon_list(stack, &digest))
 }
 
 
