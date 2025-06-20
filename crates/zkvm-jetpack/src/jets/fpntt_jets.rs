@@ -2,7 +2,7 @@ use crate::form::bpoly::bitreverse;
 use crate::form::fext::fpow;
 use crate::form::{Belt, FPolySlice, Felt, Poly};
 use crate::hand::handle::{finalize_poly, new_handle_mut_slice};
-use crate::jets::tip5_jets::tip5_assert_all_based;
+use crate::jets::tip5_jets::assert_all_based;
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::NounExt;
 use crate::utils::hoon_list_to_vecbelt;
@@ -19,7 +19,7 @@ const DEG:u64 = 3; // field extension degree
 // frep: inverse of frip; list of belts are rep'd to a felt
 fn frep(x: Vec<Belt>) -> Result<Felt, JetErr> {
     assert_eq!(x.len() as u64, DEG);
-    tip5_assert_all_based(&x);
+    assert_all_based(&x);
     Ok(felt_from_u64s(x[0].0,x[1].0,x[2].0))
 }
 
