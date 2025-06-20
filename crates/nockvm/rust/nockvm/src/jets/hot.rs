@@ -124,7 +124,31 @@ pub const URBIT_HOT_STATE: &[HotEntry] = &[
         1,
         jet_zing,
     ),
-    //
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"fand")],
+        1,
+        jet_fand,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"find")],
+        1,
+        jet_find,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"oust")],
+        1,
+        jet_oust,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"rear")],
+        1,
+        jet_rear,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"scag")],
+        1,
+        jet_scag,
+    ),
     (
         &[K_138, Left(b"one"), Left(b"two"), Left(b"bex")],
         1,
