@@ -198,7 +198,7 @@ pub fn bppow(a: &[Belt], mut n: usize) -> Vec<Belt> {
 }
 
 #[inline]
-fn bitreverse(mut n: u32, l: u32) -> u32 {
+pub fn bitreverse(mut n: u32, l: u32) -> u32 {
     let mut r = 0;
     for _ in 0..l {
         r = (r << 1) | (n & 1);
