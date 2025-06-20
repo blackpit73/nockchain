@@ -217,7 +217,7 @@ pub const XTRA_JETS: &[HotEntry] = &[
             Left(b"based")
         ],
         1,
-        based_one_jet,
+        based_jet,
     ),
     (
         &[
