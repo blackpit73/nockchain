@@ -200,10 +200,10 @@ pub const XTRA_JETS: &[HotEntry] = &[
             Left(b"qua"),
             Left(b"pen"),
             Left(b"zeke"),
-            Left(b"rip-correct")
+            Left(b"transpose-bpolys"),
         ],
         1,
-        rip_correct_jet,
+        transpose_bpolys_jet,
     ),
     (
         &[
@@ -214,10 +214,11 @@ pub const XTRA_JETS: &[HotEntry] = &[
             Left(b"qua"),
             Left(b"pen"),
             Left(b"zeke"),
-            Left(b"based")
+            Left(b"ave"),
+            Left(b"snag"),
         ],
         1,
-        based_jet,
+        snag_one_jet,
     ),
     (
         &[
@@ -228,26 +229,11 @@ pub const XTRA_JETS: &[HotEntry] = &[
             Left(b"qua"),
             Left(b"pen"),
             Left(b"zeke"),
-            Left(b"mary-utils"),
-            Left(b"fet")
+            Left(b"ave"),
+            Left(b"snag-as-bpoly"),
         ],
         1,
-        fet_jet,
-    ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"mary-utils"),
-            Left(b"lift-elt")
-        ],
-        1,
-        lift_elt_jet,
+        snag_as_bpoly_jet,
     ),
 ];
 
