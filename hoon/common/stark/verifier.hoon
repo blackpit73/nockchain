@@ -99,7 +99,7 @@
   =^  chals-rd2=(list belt)  rng  (belts:rng num-chals-rd2:chal)
   =/  challenges  (weld chals-rd1 chals-rd2)
   =/  chal-map=(map term belt)
-      (bp-zip-chals-list:chal chal-names-basic:chal challenges)
+    (bp-zip-chals-list:chal chal-names-basic:chal challenges)
   ::
   =/  [alf=pelt j=pelt k=pelt l=pelt m=pelt z=pelt]
     :*  (got-pelt chal-map %alf)
@@ -151,6 +151,7 @@
       [t (~(snag bop terminals) (add idx i))]
     %-  ~(put by dyn-map)
     [table-num (~(swag bop terminals) idx (lent terms))]
+  ::
   ::
   ?.  (linking-checks subj-data form-data prod-data j k l m z terminal-map)
     ~&  "failed input linking checks"  !!
