@@ -346,31 +346,45 @@ pub fn http() -> IODriverFn {
         let channel_map = RwLock::new(HashMap::<u64, Responder>::new());
         let regular_cache = Arc::new(RwLock::new(Option::<CachedResponse>::None));
         let htmx_cache = Arc::new(RwLock::new(Option::<CachedResponse>::None));
-        let cache_duration = Duration::from_secs(30);
 
-        let _regular_cache_invalidation_handle = {
-            let regular_cache = Arc::clone(&regular_cache);
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(cache_duration);
-                loop {
-                    interval.tick().await;
-                    debug!("invalidating regular response cache");
-                    *regular_cache.write().await = None;
-                }
-            })
-        };
+        // Parse cache expiration from environment variable, default to never expire
+        let cache_duration = env::var("EXPIRE_CACHE")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .map(Duration::from_secs);
 
-        let _htmx_cache_invalidation_handle = {
-            let htmx_cache = Arc::clone(&htmx_cache);
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(cache_duration);
-                loop {
-                    interval.tick().await;
-                    debug!("invalidating htmx response cache");
-                    *htmx_cache.write().await = None;
-                }
-            })
-        };
+        if let Some(cache_duration) = cache_duration {
+            info!(
+                "Cache expiration enabled: {} seconds",
+                cache_duration.as_secs()
+            );
+
+            let _regular_cache_invalidation_handle = {
+                let regular_cache = Arc::clone(&regular_cache);
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(cache_duration);
+                    loop {
+                        interval.tick().await;
+                        debug!("invalidating regular response cache");
+                        *regular_cache.write().await = None;
+                    }
+                })
+            };
+
+            let _htmx_cache_invalidation_handle = {
+                let htmx_cache = Arc::clone(&htmx_cache);
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(cache_duration);
+                    loop {
+                        interval.tick().await;
+                        debug!("invalidating htmx response cache");
+                        *htmx_cache.write().await = None;
+                    }
+                })
+            };
+        } else {
+            info!("Cache expiration disabled - cache will persist until restart");
+        }
 
         loop {
             select! {
@@ -405,9 +419,16 @@ pub fn http() -> IODriverFn {
 
                             let cache_read = cache_to_use.read().await;
                             if let Some(cached) = &*cache_read {
-                                if !cached.is_expired(cache_duration) {
+                                // Check expiration only if cache_duration is set
+                                let should_serve = if let Some(cache_duration) = cache_duration {
+                                    !cached.is_expired(cache_duration)
+                                } else {
+                                    true // Never expire if no duration set
+                                };
+
+                                if should_serve {
                                     let cache_type = if is_htmx { "HTMX" } else { "regular" };
-                                    debug!("serving cached {} response for {}", cache_type, msg.uri);
+                                    info!("serving cached {} response for {}", cache_type, msg.uri);
                                     let cached_response = cached.to_response()?;
                                     let _ = msg.resp.send(Ok(cached_response));
                                     return Ok(());
@@ -481,7 +502,7 @@ pub fn http() -> IODriverFn {
                     let effect_result = async {
                         let slab = match effect {
                             Ok(slab) => {
-                                debug!("received effect from kernel");
+                                info!("received effect from kernel");
                                 slab
                             }
                             Err(e) => {
@@ -494,7 +515,7 @@ pub fn http() -> IODriverFn {
 
                         let head_tag = res_list.head().as_atom()?;
                         let tag_val = head_tag.as_u64().map_err(|e| HttpError::AtomCreationError(e.to_string()))?;
-                        if tag_val != tas!(b"res") && tag_val != tas!(b"cache") && tag_val != tas!(b"htmx") {
+                        if tag_val != tas!(b"res") && tag_val != tas!(b"cache") && tag_val != tas!(b"htmx") && tag_val != tas!(b"h-cache") {
                             info!("http: not an HTTP response effect, skipping. Got tag: {:?}", head_tag);
                             return Ok(());
                         }
@@ -598,18 +619,20 @@ pub fn http() -> IODriverFn {
                                 res = res.header(k, v);
                             }
 
-                            let bod = res_builder.body.ok_or(HttpError::InvalidResponseBody)?;
+                            let response_body = res_builder.body
+                                .map(Body::from)
+                                .unwrap_or_else(|| Body::empty());
 
-                            let response = res.body(Body::from(bod)).map_err(HttpError::ResponseBuildError)?;
+                            let response = res.body(response_body).map_err(HttpError::ResponseBuildError)?;
 
                             // Cache logic - determine which cache to use based on effect type
                             if status == StatusCode::OK {
                                 let cached_response = CachedResponse::new(status, header_vec.clone(), body.clone());
-                                if tag_val == tas!(b"htmx") || tag_val == tas!(b"cache") {
-                                    info!("caching HTMX response (htmx or cache effect)");
+                                if tag_val == tas!(b"htmx") || tag_val == tas!(b"h-cache") {
+                                    info!("caching HTMX response (htmx or h-cache effect)");
                                     *htmx_cache.write().await = Some(cached_response);
                                 } else {
-                                    info!("caching regular response (res effect)");
+                                    info!("caching regular response (res or cache effect)");
                                     *regular_cache.write().await = Some(cached_response);
                                 }
                             }
@@ -705,7 +728,6 @@ async fn nockvm_handler(
                         "Channel closed, waiting for recreation (retry {}/{})",
                         retry_count, MAX_RETRIES
                     );
-
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
                     // Need to create a new oneshot channel for the retry

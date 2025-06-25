@@ -4,6 +4,7 @@ use crate::nockapp::NockAppError;
 use crate::noun::slab::NounSlab;
 use crate::Bytes;
 use bytes::buf::BufMut;
+
 use std::sync::Arc;
 
 use nockvm::noun::{D, T};
@@ -13,8 +14,14 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::select;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, timeout, Duration};
 use tracing::{debug, error};
+
+/// Timeout constants for npc driver operations
+const OVERALL_WRITE_TIMEOUT_SECS: u64 = 300; // 5 minutes
+const LENGTH_WRITE_TIMEOUT_SECS: u64 = 5; // 5 seconds
+const CONTENT_WRITE_TIMEOUT_SECS: u64 = 60; // 1 minute
+const LISTENER_SLEEP_MILLIS: u64 = 100; // 100ms to avoid tight-looping
 
 pub enum NpcWire {
     Poke(u64),
@@ -65,7 +72,7 @@ pub fn npc_listener(listener: UnixListener) -> IODriverFn {
                     }
                 },
                 // TODO: don't do this, revive robin hood
-                _ = sleep(Duration::from_millis(100)) => {
+                _ = sleep(Duration::from_millis(LISTENER_SLEEP_MILLIS)) => {
                     // avoid tight-looping
                 }
             }
@@ -117,8 +124,14 @@ pub fn npc_client(stream: UnixStream) -> IODriverFn {
                                     let mut response_slab = NounSlab::new();
                                     let response_noun = T(&mut response_slab, &[D(pid), D(tag), noun]);
                                     response_slab.set_root(response_noun);
-                                    if !write_message(&mut stream_write, response_slab).await? {
-                                        break 'driver;
+                                    match write_message(&mut stream_write, response_slab).await {
+                                        Ok(false) => break 'driver,
+                                        Err(NockAppError::IoError(e)) if e.kind() == std::io::ErrorKind::TimedOut => {
+                                            error!("npc_client: write timeout, closing connection to allow reconnect");
+                                            break 'driver;
+                                        },
+                                        Err(e) => return Err(e),
+                                        Ok(true) => {}, // Success, continue
                                     }
                                 },
                                 tas!(b"peek") => {
@@ -131,8 +144,14 @@ pub fn npc_client(stream: UnixStream) -> IODriverFn {
                                             bind_slab.modify(|root| {
                                                 vec![D(pid), D(tas!(b"bind")), root]
                                             });
-                                            if !write_message(&mut stream_write, bind_slab).await? {
-                                                break 'driver;
+                                            match write_message(&mut stream_write, bind_slab).await {
+                                                Ok(false) => break 'driver,
+                                                Err(NockAppError::IoError(e)) if e.kind() == std::io::ErrorKind::TimedOut => {
+                                                    error!("npc_client: write timeout, closing connection to allow reconnect");
+                                                    break 'driver;
+                                                },
+                                                Err(e) => return Err(e),
+                                                Ok(true) => {}, // Success, continue
                                             }
                                         },
                                         None => {
@@ -190,8 +209,14 @@ pub fn npc_client(stream: UnixStream) -> IODriverFn {
                     // TODO: distinguish connections
                     if unsafe { effect_cell.head().raw_equals(&D(tas!(b"npc"))) } {
                         slab.set_root(effect_cell.tail());
-                        if !write_message(&mut stream_write, slab).await? {
-                            break 'driver;
+                        match write_message(&mut stream_write, slab).await {
+                            Ok(false) => break 'driver,
+                            Err(NockAppError::IoError(e)) if e.kind() == std::io::ErrorKind::TimedOut => {
+                                error!("npc_client: write timeout, closing connection to allow reconnect");
+                                break 'driver;
+                            },
+                            Err(e) => return Err(e),
+                            Ok(true) => {}, // Success, continue
                         }
                     }
                 }
@@ -255,35 +280,100 @@ async fn write_message(
     let msg_bytes = msg_slab.jam();
     let msg_len = msg_bytes.len();
     debug!("Attempting to write message of {} bytes", msg_len);
-    let mut msg_len_bytes = &msg_len.to_le_bytes()[..];
-    let mut msg_buf = &msg_bytes[..];
-    while !msg_len_bytes.is_empty() {
-        debug!(
-            "Writing message length, {} bytes remaining",
-            msg_len_bytes.len()
-        );
-        let bytes = stream
-            .write_buf(&mut msg_len_bytes)
+
+    // timeout wrapper for entire write operation
+    let write_timeout = Duration::from_secs(OVERALL_WRITE_TIMEOUT_SECS);
+
+    match timeout(write_timeout, async {
+        let mut msg_len_bytes = &msg_len.to_le_bytes()[..];
+        let mut msg_buf = &msg_bytes[..];
+
+        // Write length header
+        while !msg_len_bytes.is_empty() {
+            debug!(
+                "Writing message length, {} bytes remaining",
+                msg_len_bytes.len()
+            );
+
+            match timeout(
+                Duration::from_secs(LENGTH_WRITE_TIMEOUT_SECS),
+                stream.write_buf(&mut msg_len_bytes),
+            )
             .await
-            .map_err(NockAppError::IoError)?;
-        if bytes == 0 {
-            debug!("Wrote 0 bytes for message length, returning false");
-            return Ok(false);
+            {
+                Ok(Ok(bytes)) => {
+                    if bytes == 0 {
+                        debug!("Wrote 0 bytes for message length, connection likely closed");
+                        return Ok(false);
+                    }
+                    debug!("Wrote {} bytes of length header", bytes);
+                }
+                Ok(Err(e)) => return Err(NockAppError::IoError(e)),
+                Err(_timeout) => {
+                    error!(
+                        "Timeout writing message length after {}s",
+                        LENGTH_WRITE_TIMEOUT_SECS
+                    );
+                    return Err(NockAppError::IoError(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "Timeout writing message length",
+                    )));
+                }
+            }
+        }
+
+        // Write message content
+        while !msg_buf.is_empty() {
+            debug!("Writing message content, {} bytes remaining", msg_buf.len());
+
+            match timeout(
+                Duration::from_secs(CONTENT_WRITE_TIMEOUT_SECS),
+                stream.write_buf(&mut msg_buf),
+            )
+            .await
+            {
+                Ok(Ok(bytes)) => {
+                    if bytes == 0 {
+                        debug!("Wrote 0 bytes for message content, connection likely closed");
+                        return Ok(false);
+                    }
+                    debug!("Wrote {} bytes of message content", bytes);
+                }
+                Ok(Err(e)) => return Err(NockAppError::IoError(e)),
+                Err(_timeout) => {
+                    error!(
+                        "Timeout writing message content after {}s, {} bytes remaining",
+                        CONTENT_WRITE_TIMEOUT_SECS,
+                        msg_buf.len()
+                    );
+                    return Err(NockAppError::IoError(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!(
+                            "Timeout writing message content - {} bytes stuck",
+                            msg_buf.len()
+                        ),
+                    )));
+                }
+            }
+        }
+
+        debug!("Successfully wrote entire message");
+        Ok(true)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(_timeout) => {
+            error!(
+                "Overall write operation timed out after {} seconds",
+                OVERALL_WRITE_TIMEOUT_SECS
+            );
+            Err(NockAppError::IoError(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Write operation timed out - socket may be stuck",
+            )))
         }
     }
-    while !msg_buf.is_empty() {
-        debug!("Writing message content, {} bytes remaining", msg_buf.len());
-        let bytes = stream
-            .write_buf(&mut msg_buf)
-            .await
-            .map_err(NockAppError::IoError)?;
-        if bytes == 0 {
-            debug!("Wrote 0 bytes for message content, returning false");
-            return Ok(false);
-        }
-    }
-    debug!("Successfully wrote entire message");
-    Ok(true)
 }
 
 #[cfg(test)]
@@ -383,7 +473,7 @@ mod tests {
             )
         });
 
-        let mut received_slab = NounSlab::new();
+        let mut received_slab: NounSlab = NounSlab::new();
         let received_noun = received_slab
             .cue_into(Bytes::from(msg_buf))
             .unwrap_or_else(|err| {
@@ -545,7 +635,7 @@ mod tests {
         });
 
         // Create test noun slab
-        let mut test_slab = NounSlab::new();
+        let mut test_slab: NounSlab = NounSlab::new();
         let msg_noun = T(&mut test_slab, &[D(tas!(b"poke")), D(123), D(456)]);
         let test_noun = T(&mut test_slab, &[D(1), msg_noun]);
         test_slab.set_root(test_noun);
