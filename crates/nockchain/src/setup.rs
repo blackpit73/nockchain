@@ -2,6 +2,7 @@ use std::error::Error;
 use std::time::Duration;
 
 use ibig::UBig;
+use nockapp::noun::slab::Jammer;
 use nockapp::noun::IntoSlab;
 use nockapp::utils::make_tas;
 use nockapp::wire::Wire;
@@ -31,7 +32,10 @@ pub enum SetupCommand {
     PokeSetBtcData,
 }
 
-pub async fn poke(nockapp: &mut NockApp, command: SetupCommand) -> Result<(), Box<dyn Error>> {
+pub async fn poke<J: Jammer + Send + 'static>(
+    nockapp: &mut NockApp<J>,
+    command: SetupCommand,
+) -> Result<(), Box<dyn Error>> {
     let poke: NounSlab = match command {
         SetupCommand::PokeFakenetConstants => {
             let mut poke_slab = NounSlab::new();

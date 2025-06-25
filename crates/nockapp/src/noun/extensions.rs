@@ -217,7 +217,7 @@ impl IntoNoun for Noun {
 }
 impl IntoNoun for &str {
     fn into_noun(self) -> Noun {
-        let mut slab = NounSlab::new();
+        let mut slab: NounSlab = NounSlab::new();
         let contents_atom = unsafe {
             let bytes = self.to_bytes().unwrap_or_else(|err| {
                 panic!(

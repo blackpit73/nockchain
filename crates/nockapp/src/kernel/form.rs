@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 use crate::metrics::NockAppMetrics;
+
 use crate::noun::slab::NounSlab;
-use crate::JammedNoun;
+use crate::save::SaveableCheckpoint;
 use blake3::{Hash, Hasher};
 use byteorder::{LittleEndian, WriteBytesExt};
 use nockvm::hamt::Hamt;
@@ -18,18 +19,17 @@ use nockvm_macros::tas;
 use std::any::Any;
 use std::fs::File;
 use std::future::Future;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, warn};
 
-use crate::kernel::checkpoint::{Checkpoint, ExportedState, JamPaths, JammedCheckpoint};
 use crate::nockapp::wire::{wire_to_noun, WireRepr};
 use crate::noun::slam;
-use crate::utils::{create_context, current_da, NOCK_STACK_SIZE, NOCK_STACK_SIZE_HUGE};
+use crate::utils::{
+    create_context, current_da, NOCK_STACK_SIZE, NOCK_STACK_SIZE_BIG, NOCK_STACK_SIZE_HUGE,
+};
 use crate::{AtomExt, CrownError, NounExt, Result, ToBytesExt};
-use bincode::config::Configuration;
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Duration;
@@ -39,25 +39,27 @@ const LOAD_AXIS: u64 = 4;
 const PEEK_AXIS: u64 = 22;
 const POKE_AXIS: u64 = 23;
 
-const SNAPSHOT_VERSION: u32 = 0;
-
 const SERF_FINISHED_INTERVAL: Duration = Duration::from_millis(100);
 const SERF_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024; // 8MB
 
+pub struct LoadState {
+    pub ker_hash: Hash,
+    pub event_num: u64,
+    pub kernel_state: NounSlab,
+}
+
 // Actions to request of the serf thread
-pub enum SerfAction {
-    // Extract this state into the serf
-    LoadState {
-        state: Vec<u8>,
-        result: oneshot::Sender<Result<()>>,
-    },
+pub enum SerfAction<C> {
     // Make a CheckPoint
     Checkpoint {
-        result: oneshot::Sender<JammedCheckpoint>,
+        result: oneshot::Sender<C>,
     },
-    // Get the state of the serf
-    GetStateBytes {
-        result: oneshot::Sender<Result<Vec<u8>>>,
+    Import {
+        state: LoadState,
+        result: oneshot::Sender<Result<()>>,
+    },
+    Export {
+        result: oneshot::Sender<Result<LoadState>>,
     },
     // Get the state noun of the kernel as a slab
     GetKernelStateSlab {
@@ -89,69 +91,32 @@ pub enum SerfAction {
     Stop,
 }
 
-pub(crate) struct SerfThread {
+pub(crate) struct SerfThread<C> {
     handle: Option<std::thread::JoinHandle<()>>,
-    action_sender: mpsc::Sender<SerfAction>,
+    action_sender: mpsc::Sender<SerfAction<C>>,
     pub cancel_token: NockCancelToken,
     inhibit: Arc<AtomicBool>,
-    /// Jam persistence buffer paths.
-    pub jam_paths: Arc<JamPaths>,
-    /// Buffer toggle for writing to the jam buffer.
-    pub buffer_toggle: Arc<AtomicBool>,
     pub event_number: Arc<AtomicU64>,
 }
 
-impl SerfThread {
+impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
     async fn new(
-        nock_stack_size: usize,
-        jam_paths: Arc<JamPaths>,
         kernel_bytes: Vec<u8>,
+        checkpoint: Option<C>,
         constant_hot_state: Vec<HotEntry>,
+        nock_stack_size: usize,
         trace: bool,
     ) -> Result<Self> {
-        let jam_paths_cloned = jam_paths.clone();
         let (action_sender, action_receiver) = mpsc::channel(1);
-        let (buffer_toggle_sender, buffer_toggle_receiver) = oneshot::channel();
         let (event_number_sender, event_number_receiver) = oneshot::channel();
         let (cancel_token_sender, cancel_token_receiver) = oneshot::channel();
         let inhibit = Arc::new(AtomicBool::new(false));
         let inhibit_clone = inhibit.clone();
-        std::fs::create_dir_all(jam_paths.0.parent().unwrap_or_else(|| {
-            panic!(
-                "Panicked at {}:{} (git sha: {:?})",
-                file!(),
-                line!(),
-                option_env!("GIT_SHA")
-            )
-        }))
-        .unwrap_or_else(|err| {
-            panic!(
-                "Panicked with {err:?} at {}:{} (git sha: {:?})",
-                file!(),
-                line!(),
-                option_env!("GIT_SHA")
-            )
-        });
         let handle = std::thread::Builder::new()
             .name("serf".to_string())
             .stack_size(SERF_THREAD_STACK_SIZE)
             .spawn(move || {
-                let mut stack = NockStack::new(nock_stack_size, 0);
-                let checkpoint = if jam_paths.checkpoint_exists() {
-                    info!("Found existing state - restoring from checkpoint");
-                    jam_paths.load_checkpoint(&mut stack).ok()
-                } else {
-                    info!("No existing state found - initializing fresh state");
-                    None
-                };
-                let buffer_toggle = Arc::new(AtomicBool::new(
-                    checkpoint
-                        .as_ref()
-                        .map_or_else(|| false, |checkpoint| !checkpoint.buff_index),
-                ));
-                buffer_toggle_sender
-                    .send(buffer_toggle.clone())
-                    .expect("Could not send buffer toggle out of serf thread");
+                let stack = NockStack::new(nock_stack_size, 0);
                 let serf = Serf::new(stack, checkpoint, &kernel_bytes, &constant_hot_state, trace);
                 event_number_sender
                     .send(serf.event_num.clone())
@@ -159,23 +124,22 @@ impl SerfThread {
                 cancel_token_sender
                     .send(serf.context.cancel_token())
                     .expect("Could not send cancel token out of serf thread");
-                serf_loop(serf, action_receiver, buffer_toggle, inhibit_clone);
+                serf_loop(serf, action_receiver, inhibit_clone);
             })?;
 
-        let buffer_toggle = buffer_toggle_receiver.await?;
         let event_number = event_number_receiver.await?;
         let cancel_token = cancel_token_receiver.await?;
         Ok(SerfThread {
             inhibit,
-            buffer_toggle,
             handle: Some(handle),
             action_sender,
-            jam_paths: jam_paths_cloned,
             event_number,
             cancel_token,
         })
     }
+}
 
+impl<C> SerfThread<C> {
     pub(crate) fn provide_metrics(
         &mut self,
         metrics: Arc<NockAppMetrics>,
@@ -282,23 +246,7 @@ impl SerfThread {
         result_fut.blocking_recv()?
     }
 
-    pub(crate) async fn load_state_from_bytes(&self, state: Vec<u8>) -> Result<()> {
-        let (result, result_fut) = oneshot::channel();
-        self.action_sender
-            .send(SerfAction::LoadState { state, result })
-            .await?;
-        result_fut.await?
-    }
-
-    pub(crate) async fn create_state_bytes(&self) -> Result<Vec<u8>> {
-        let (result, result_fut) = oneshot::channel();
-        self.action_sender
-            .send(SerfAction::GetStateBytes { result })
-            .await?;
-        result_fut.await?
-    }
-
-    pub(crate) fn checkpoint(&self) -> impl Future<Output = Result<JammedCheckpoint>> {
+    pub(crate) fn checkpoint(&self) -> impl Future<Output = Result<C>> {
         let (result, result_fut) = oneshot::channel();
         let action_sender = self.action_sender.clone();
         async move {
@@ -308,23 +256,31 @@ impl SerfThread {
             Ok(result_fut.await?)
         }
     }
-}
 
-fn load_state_from_bytes(serf: &mut Serf, state_bytes: &[u8]) -> Result<()> {
-    let noun = extract_state_from_bytes(serf.stack(), state_bytes)?;
-    let arvo = serf.load(noun)?;
-    unsafe {
-        serf.event_update(serf.event_num.load(Ordering::SeqCst), arvo);
-        serf.preserve_event_update_leftovers();
+    pub fn import(&self, state: LoadState) -> impl Future<Output = Result<()>> {
+        let (result, result_fut) = oneshot::channel();
+        let action_sender = self.action_sender.clone();
+        async move {
+            action_sender
+                .send(SerfAction::Import { state, result })
+                .await?;
+            Ok(result_fut.await??)
+        }
     }
 
-    Ok(())
+    pub fn export(&self) -> impl Future<Output = Result<LoadState>> {
+        let (result, result_fut) = oneshot::channel();
+        let action_sender = self.action_sender.clone();
+        async move {
+            action_sender.send(SerfAction::Export { result }).await?;
+            Ok(result_fut.await??)
+        }
+    }
 }
 
-fn serf_loop(
+fn serf_loop<C: SerfCheckpoint>(
     mut serf: Serf,
-    mut action_receiver: mpsc::Receiver<SerfAction>,
-    buffer_toggle: Arc<AtomicBool>,
+    mut action_receiver: mpsc::Receiver<SerfAction<C>>,
     inhibit: Arc<AtomicBool>,
 ) {
     loop {
@@ -340,34 +296,54 @@ fn serf_loop(
         };
         let action_start = std::time::Instant::now();
         match action {
-            SerfAction::LoadState { state, result } => {
-                let res = load_state_from_bytes(&mut serf, &state);
-                let _ = result.send(res).map_err(|e| {
-                    debug!("Could not send load state result");
-                    e
-                });
-                let action_elapsed = action_start.elapsed();
-                if let Some(nockapp_metrics) = &serf.metrics {
-                    nockapp_metrics
-                        .serf_loop_load_state
-                        .add_timing(&action_elapsed);
-                };
-            }
             SerfAction::Stop => {
                 break;
             }
-            SerfAction::GetStateBytes { result } => {
-                let state_bytes = create_state_bytes(&mut serf);
-                let _ = result.send(state_bytes).map_err(|e| {
-                    debug!("Could not send state bytes to dropped channel");
-                    e
+            SerfAction::Export { result } => {
+                let kernel_state_noun = serf.arvo.slot(STATE_AXIS);
+                let kernel_state = kernel_state_noun.map_or_else(
+                    |err| Err(CrownError::from(err)),
+                    |noun| {
+                        let mut slab = NounSlab::new();
+                        slab.copy_into(noun);
+                        Ok(slab)
+                    },
+                );
+                let load_state = kernel_state.map(|kernel_state| LoadState {
+                    kernel_state,
+                    ker_hash: serf.ker_hash,
+                    event_num: serf.event_num.load(Ordering::SeqCst),
                 });
-                let action_elapsed = action_start.elapsed();
-                if let Some(nockapp_metrics) = &serf.metrics {
-                    nockapp_metrics
-                        .serf_loop_get_state_bytes
-                        .add_timing(&action_elapsed);
-                };
+                let _ = result.send(load_state).map_err(|err| {
+                    debug!("Failed to send to dropped channel");
+                    err
+                });
+            }
+            SerfAction::Import { state, result } => {
+                let state_noun = state.kernel_state.copy_to_stack(serf.stack());
+                let arvo = serf.load(state_noun);
+                match arvo {
+                    Err(e) => {
+                        let _ = result.send(Err(e)).map_err(|err| {
+                            debug!("Tried to send to dropped channel: {:?}", err);
+                        });
+                    }
+                    Ok(arvo) => {
+                        if serf.ker_hash != state.ker_hash {
+                            debug!(
+                                "Importing state from kernel hash {} into kernel hash {}",
+                                state.ker_hash, serf.ker_hash
+                            );
+                        }
+                        unsafe {
+                            serf.event_update(state.event_num, arvo);
+                            serf.preserve_event_update_leftovers();
+                        }
+                        let _ = result.send(Ok(())).map_err(|err| {
+                            debug!("Tried to send to dropped channel: {:?}", err);
+                        });
+                    }
+                }
             }
             SerfAction::GetKernelStateSlab { result } => {
                 let kernel_state_noun = serf.arvo.slot(STATE_AXIS);
@@ -410,8 +386,7 @@ fn serf_loop(
             }
             SerfAction::Checkpoint { result } => {
                 let metrics_checkpoint = serf.metrics.clone();
-                let checkpoint =
-                    create_checkpoint(&mut serf, buffer_toggle.clone(), &metrics_checkpoint);
+                let checkpoint = create_checkpoint(&mut serf, &metrics_checkpoint);
                 //result.send(checkpoint).expect("Could not send checkpoint");
                 if result.send(checkpoint).is_err() {
                     debug!(
@@ -502,132 +477,10 @@ fn serf_loop(
     }
 }
 
-/// Extracts the kernel state from a jammed checkpoint or exported state
-fn extract_state_from_bytes(stack: &mut NockStack, state_bytes: &[u8]) -> Result<Noun> {
-    // First try to decode as JammedCheckpoint
-    match extract_from_checkpoint(stack, state_bytes) {
-        Ok(noun) => {
-            debug!("Successfully loaded state from JammedCheckpoint format");
-            Ok(noun)
-        }
-        Err(e1) => {
-            // Then try to decode as ExportedState
-            match extract_from_exported_state(stack, state_bytes) {
-                Ok(noun) => {
-                    debug!("Successfully loaded state from ExportedState format");
-                    Ok(noun)
-                }
-                Err(e2) => {
-                    warn!("Failed to load as JammedCheckpoint: {}", e1);
-                    warn!("Failed to load as ExportedState: {}", e2);
-                    warn!("State bytes format is not recognized");
-                    Err(CrownError::StateJamFormatError)
-                }
-            }
-        }
-    }
-}
-
-/// Extracts the kernel state from an ExportedState
-fn extract_from_exported_state(stack: &mut NockStack, state_jam: &[u8]) -> Result<Noun> {
-    let config = bincode::config::standard();
-
-    // Try to decode as ExportedState
-    let (exported, _) = bincode::decode_from_slice::<ExportedState, Configuration>(
-        state_jam, config,
-    )
-    .map_err(|e| {
-        debug!("Failed to decode state jam as ExportedState: {}", e);
-        CrownError::StateJamFormatError
-    })?;
-
-    // Verify the magic bytes
-    if exported.magic_bytes != tas!(b"EXPJAM") {
-        debug!("Invalid magic bytes for ExportedState: expected EXPJAM");
-        return Err(CrownError::StateJamFormatError);
-    }
-
-    // Extract the kernel state from the jammed noun
-    let noun = <Noun as NounExt>::cue_bytes(stack, &exported.jam.0).map_err(|e| {
-        warn!("Failed to cue bytes from exported state jam: {:?}", e);
-        CrownError::StateJamFormatError
-    })?;
-
-    debug!("Successfully extracted kernel state from ExportedState");
-    Ok(noun)
-}
-
-/// Extracts the kernel state from a JammedCheckpoint
-fn extract_from_checkpoint(stack: &mut NockStack, state_jam: &[u8]) -> Result<Noun> {
-    let config = bincode::config::standard();
-
-    // Try to decode as JammedCheckpoint
-    let (checkpoint, _) = bincode::decode_from_slice::<JammedCheckpoint, Configuration>(
-        state_jam, config,
-    )
-    .map_err(|e| {
-        debug!("Failed to decode state jam as JammedCheckpoint: {}", e);
-        CrownError::StateJamFormatError
-    })?;
-
-    // Verify the magic bytes
-    if checkpoint.magic_bytes != tas!(b"CHKJAM") {
-        debug!("Invalid magic bytes for JammedCheckpoint: expected CHKJAM");
-        return Err(CrownError::StateJamFormatError);
-    }
-
-    // Validate the checkpoint
-    if !checkpoint.validate() {
-        warn!("Checkpoint validation failed");
-        return Err(CrownError::StateJamFormatError);
-    }
-
-    // Extract the kernel state from the jammed noun
-    let cell = <Noun as NounExt>::cue_bytes(stack, &checkpoint.jam.0)
-        .map_err(|e| {
-            warn!("Failed to cue bytes from checkpoint jam: {:?}", e);
-            CrownError::StateJamFormatError
-        })?
-        .as_cell()
-        .map_err(|e| {
-            warn!("Failed to convert noun to cell: {}", e);
-            CrownError::StateJamFormatError
-        })?;
-
-    // The kernel state is the head of the cell
-    debug!("Successfully extracted kernel state from JammedCheckpoint");
-    Ok(cell.head())
-}
-
-/// Creates a serialized byte array from the current kernel state
-fn create_state_bytes(serf: &mut Serf) -> Result<Vec<u8>> {
-    let version = serf.version;
-    let ker_hash = serf.ker_hash;
-    let event_num = serf.event_num.load(Ordering::SeqCst);
-    let ker_state = serf.arvo.slot(STATE_AXIS).unwrap_or_else(|err| {
-        panic!(
-            "Panicked with {err:?} at {}:{} (git sha: {:?})",
-            file!(),
-            line!(),
-            option_env!("GIT_SHA")
-        )
-    });
-
-    let exported_state = ExportedState::new(serf.stack(), version, ker_hash, event_num, &ker_state);
-
-    let encoded = exported_state
-        .encode()
-        .map_err(|_| CrownError::StateJamFormatError)?;
-
-    Ok(encoded)
-}
-
-fn create_checkpoint(
+fn create_checkpoint<C: SerfCheckpoint>(
     serf: &mut Serf,
-    buffer_toggle: Arc<AtomicBool>,
     metrics: &Option<Arc<NockAppMetrics>>,
-) -> JammedCheckpoint {
-    let version = serf.version;
+) -> C {
     let ker_hash = serf.ker_hash;
     let event_num = serf.event_num.load(Ordering::SeqCst);
     let ker_state = serf.arvo.slot(STATE_AXIS).unwrap_or_else(|err| {
@@ -638,37 +491,25 @@ fn create_checkpoint(
             option_env!("GIT_SHA")
         )
     });
-    let cold = serf.context.cold;
-    let cold_noun_start = Instant::now();
-    let cold_noun = (cold).into_noun(serf.stack());
-    let cold_noun_elapsed = cold_noun_start.elapsed();
+    let cold_state = serf.context.cold;
 
-    let cell = T(serf.stack(), &[ker_state, cold_noun]);
-
-    let jam_start = Instant::now();
-    let jam = JammedNoun::from_noun(serf.stack(), cell);
-    let jam_elapsed = jam_start.elapsed();
-
-    if let Some(metrics) = metrics {
-        metrics
-            .serf_loop_noun_encode_cold_state
-            .add_timing(&cold_noun_elapsed);
-        metrics.serf_loop_jam_checkpoint.add_timing(&jam_elapsed);
-    }
-
-    let buff_index = buffer_toggle.load(Ordering::SeqCst);
-    JammedCheckpoint::new(version, buff_index, ker_hash, event_num, jam)
+    C::new(
+        serf.stack(),
+        ker_hash,
+        event_num,
+        ker_state,
+        cold_state,
+        metrics,
+    )
 }
 
 /// Represents a Sword kernel, containing a Serf and snapshot location.
-pub struct Kernel {
+pub struct Kernel<C> {
     /// The Serf managing the interface to the Sword.
-    pub(crate) serf: SerfThread,
-    /// Directory path for storing pma snapshots.
-    pma_dir: Arc<PathBuf>,
+    pub(crate) serf: SerfThread<C>,
 }
 
-impl Kernel {
+impl<C: SerfCheckpoint + 'static> Kernel<C> {
     /// Loads a kernel with a custom hot state.
     ///
     /// # Arguments
@@ -682,45 +523,48 @@ impl Kernel {
     ///
     /// A new `Kernel` instance.
     pub async fn load_with_hot_state(
-        pma_dir: PathBuf,
-        jam_paths: JamPaths,
         kernel: &[u8],
+        checkpoint: Option<C>,
         hot_state: &[HotEntry],
         trace: bool,
     ) -> Result<Self> {
-        let jam_paths_arc = Arc::new(jam_paths);
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
-        let pma_dir_arc = Arc::new(pma_dir);
         let serf = SerfThread::new(
-            NOCK_STACK_SIZE, jam_paths_arc, kernel_vec, hot_state_vec, trace,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE, trace,
         )
         .await?;
-        Ok(Self {
-            serf,
-            pma_dir: pma_dir_arc,
-        })
+        Ok(Self { serf })
+    }
+
+    pub async fn load_with_hot_state_big(
+        kernel: &[u8],
+        checkpoint: Option<C>,
+        hot_state: &[HotEntry],
+        trace: bool,
+    ) -> Result<Self> {
+        let kernel_vec = Vec::from(kernel);
+        let hot_state_vec = Vec::from(hot_state);
+        let serf = SerfThread::new(
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_BIG, trace,
+        )
+        .await?;
+        Ok(Self { serf })
     }
 
     pub async fn load_with_hot_state_huge(
-        pma_dir: PathBuf,
-        jam_paths: JamPaths,
         kernel: &[u8],
+        checkpoint: Option<C>,
         hot_state: &[HotEntry],
         trace: bool,
     ) -> Result<Self> {
-        let jam_paths_arc = Arc::new(jam_paths);
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
-        let pma_dir_arc = Arc::new(pma_dir);
         let serf = SerfThread::new(
-            NOCK_STACK_SIZE_HUGE, jam_paths_arc, kernel_vec, hot_state_vec, trace,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_HUGE, trace,
         )
         .await?;
-        Ok(Self {
-            serf,
-            pma_dir: pma_dir_arc,
-        })
+        Ok(Self { serf })
     }
 
     /// Loads a kernel with default hot state.
@@ -734,49 +578,17 @@ impl Kernel {
     /// # Returns
     ///
     /// A new `Kernel` instance.
-    pub async fn load(
-        pma_dir: PathBuf,
-        jam_paths: JamPaths,
-        kernel: &[u8],
-        trace: bool,
-    ) -> Result<Self> {
-        Self::load_with_hot_state(pma_dir, jam_paths, kernel, &Vec::new(), trace).await
-    }
-
-    /// Loads a kernel with state from jammed bytes
-    pub async fn load_with_kernel_state(
-        pma_dir: PathBuf,
-        jam_paths: JamPaths,
-        kernel_jam: &[u8],
-        state_bytes: &[u8],
-        hot_state: &[HotEntry],
-        trace: bool,
-    ) -> Result<Self> {
-        let kernel =
-            Self::load_with_hot_state(pma_dir, jam_paths, kernel_jam, hot_state, trace).await?;
-
-        match kernel
-            .serf
-            .load_state_from_bytes(Vec::from(state_bytes))
-            .await
-        {
-            Ok(_) => {
-                debug!("Successfully loaded state from bytes");
-                Ok(kernel)
-            }
-            Err(e) => {
-                error!("Failed to load state from state bytes: {}", e);
-                error!("The state bytes format is not recognized. It should be either a JammedCheckpoint or an ExportedState.");
-                Err(e)
-            }
-        }
+    pub async fn load(kernel: &[u8], checkpoint: Option<C>, trace: bool) -> Result<Self> {
+        Self::load_with_hot_state(kernel, checkpoint, &Vec::new(), trace).await
     }
 
     /// Produces a checkpoint of the kernel state.
-    pub fn checkpoint(&self) -> impl Future<Output = Result<JammedCheckpoint>> {
+    pub fn checkpoint(&self) -> impl Future<Output = Result<C>> {
         self.serf.checkpoint()
     }
+}
 
+impl<C> Kernel<C> {
     // We are very carefully ensuring the future does not contain the "self" reference to ensure no lifetime issues when spawning tasks
     pub fn poke(&self, wire: WireRepr, cause: NounSlab) -> impl Future<Output = Result<NounSlab>> {
         self.serf.poke(wire, cause)
@@ -796,23 +608,25 @@ impl Kernel {
         self.serf.peek(ovo)
     }
 
+    pub fn import(&self, state: LoadState) -> impl Future<Output = Result<()>> {
+        self.serf.import(state)
+    }
+
+    pub fn export(&self) -> impl Future<Output = Result<LoadState>> {
+        self.serf.export()
+    }
+
     pub(crate) fn provide_metrics(
         &mut self,
         metrics: Arc<NockAppMetrics>,
     ) -> impl Future<Output = Result<()>> {
         self.serf.provide_metrics(metrics)
     }
-
-    pub async fn create_state_bytes(&self) -> Result<Vec<u8>> {
-        self.serf.create_state_bytes().await
-    }
 }
 
 /// Represents the Serf, which maintains context and provides an interface to
 /// the Sword.
 pub struct Serf {
-    /// Version number of snapshot
-    pub version: u32,
     /// Hash of boot kernel
     pub ker_hash: Hash,
     /// The current Arvo state.
@@ -841,19 +655,41 @@ impl Serf {
     /// # Returns
     ///
     /// A new `Serf` instance.
-    fn new(
+    fn new<C: SerfCheckpoint>(
         mut stack: NockStack,
-        checkpoint: Option<Checkpoint>,
+        checkpoint: Option<C>,
         kernel_bytes: &[u8],
         constant_hot_state: &[HotEntry],
         trace: bool,
     ) -> Self {
         let hot_state = [URBIT_HOT_STATE, constant_hot_state].concat();
 
-        let (cold, event_num_raw) = checkpoint.as_ref().map_or_else(
-            || (Cold::new(&mut stack), 0),
-            |snapshot| (snapshot.cold, snapshot.event_num),
-        );
+        let mut hasher = Hasher::new();
+        hasher.update(kernel_bytes);
+        let ker_hash = hasher.finalize();
+
+        let (maybe_state, cold, event_num_raw) = if let Some(c) = checkpoint {
+            let saveable = c.load();
+
+            let checkpoint_noun = saveable.noun.copy_to_stack(&mut stack);
+            let checkpoint_cell = checkpoint_noun
+                .as_cell()
+                .expect("snapshot noun should be a cell");
+            let ker_state = checkpoint_cell.head();
+            let cold_noun = checkpoint_cell.tail();
+            let cold_vecs = Cold::from_noun(&mut stack, &cold_noun)
+                .expect("Could not load cold state from snapshot");
+            let cold = Cold::from_vecs(&mut stack, cold_vecs.0, cold_vecs.1, cold_vecs.2);
+            if saveable.ker_hash != ker_hash {
+                debug!(
+                    "Loading snapshot from kernel {} into kernel {}",
+                    saveable.ker_hash, ker_hash
+                );
+            }
+            (Some(ker_state), cold, saveable.event_num)
+        } else {
+            (None, Cold::new(&mut stack), 0)
+        };
 
         let event_num = Arc::new(AtomicU64::new(event_num_raw));
 
@@ -872,10 +708,6 @@ impl Serf {
 
         let mut context = create_context(stack, &hot_state, cold, trace_info);
         let cancel_token = context.cancel_token();
-
-        let version = checkpoint
-            .as_ref()
-            .map_or_else(|| SNAPSHOT_VERSION, |snapshot| snapshot.version);
 
         let mut arvo = {
             let kernel_trap = Noun::cue_bytes_slice(&mut context.stack, kernel_bytes)
@@ -906,12 +738,7 @@ impl Serf {
             }
         };
 
-        let mut hasher = Hasher::new();
-        hasher.update(kernel_bytes);
-        let ker_hash = hasher.finalize();
-
         let mut serf = Self {
-            version,
             ker_hash,
             arvo,
             context,
@@ -920,14 +747,8 @@ impl Serf {
             metrics: None,
         };
 
-        if let Some(checkpoint) = checkpoint {
-            if ker_hash != checkpoint.ker_hash {
-                info!(
-                    "Kernel hash changed: {:?} -> {:?}",
-                    checkpoint.ker_hash, ker_hash
-                );
-            }
-            arvo = serf.load(checkpoint.ker_state).expect("serf: load failed");
+        if let Some(kernel_state) = maybe_state {
+            arvo = serf.load(kernel_state).expect("serf: load failed");
         }
 
         unsafe {
@@ -1358,22 +1179,17 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
-    use tempfile::TempDir;
 
-    async fn setup_kernel(jam: &str) -> (Kernel, TempDir) {
-        let temp_dir = TempDir::new().expect("Failed to create temp directory");
-        let snap_dir = temp_dir.path().to_path_buf();
-        let jam_paths = JamPaths::new(&snap_dir);
+    async fn setup_kernel(jam: &str) -> Kernel<SaveableCheckpoint> {
         let jam_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("assets")
             .join(jam);
         let jam_bytes =
             fs::read(jam_path).unwrap_or_else(|_| panic!("Failed to read {} file", jam));
-        let kernel = Kernel::load(snap_dir, jam_paths, &jam_bytes, false)
+        Kernel::load(&jam_bytes, None, false)
             .await
-            .expect("Could not load kernel");
-        (kernel, temp_dir)
+            .expect("Could not load kernel")
     }
 
     // Convert this to an integration test and feed it the kernel.jam from Choo in CI/CD
@@ -1392,4 +1208,62 @@ mod tests {
     //     let (kernel, _temp_dir) = setup_kernel("kernel.jam");
     //     // Add your custom assertions here to test the kernel's behavior
     // }
+}
+
+pub trait SerfCheckpoint: Send {
+    fn new(
+        stack: &mut NockStack,
+        ker_hash: Hash,
+        event_num: u64,
+        kernel_state: Noun,
+        cold_state: Cold,
+        metrics: &Option<Arc<NockAppMetrics>>,
+    ) -> Self;
+
+    fn load(self) -> SaveableCheckpoint;
+}
+
+impl SerfCheckpoint for SaveableCheckpoint {
+    fn new(
+        stack: &mut NockStack,
+        ker_hash: Hash,
+        event_num: u64,
+        kernel_state: Noun,
+        cold_state: Cold,
+        metrics: &Option<Arc<NockAppMetrics>>,
+    ) -> Self {
+        let mut slab = NounSlab::new();
+
+        let cold_noun_start = Instant::now();
+        // Cold state has nouns in it which are *not* copied in into_noun
+        // TODO: FIX THIS FOOTGUN
+        let cold_stack_noun = cold_state.into_noun(stack);
+        let cold_noun = slab.copy_into(cold_stack_noun);
+        let cold_noun_elapsed = cold_noun_start.elapsed();
+
+        let state_copy_start = Instant::now();
+        let kernel_state_slab = slab.copy_into(kernel_state);
+        let state_copy_elapsed = state_copy_start.elapsed();
+
+        let cell = T(&mut slab, &[kernel_state_slab, cold_noun]);
+        slab.set_root(cell);
+
+        if let Some(metrics) = metrics {
+            metrics
+                .serf_loop_noun_encode_cold_state
+                .add_timing(&cold_noun_elapsed);
+            metrics
+                .serf_loop_copy_state_noun
+                .add_timing(&state_copy_elapsed);
+        }
+        Self {
+            ker_hash,
+            event_num,
+            noun: slab,
+        }
+    }
+
+    fn load(self) -> SaveableCheckpoint {
+        self
+    }
 }

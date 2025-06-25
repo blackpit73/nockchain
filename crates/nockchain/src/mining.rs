@@ -1,13 +1,13 @@
 use std::str::FromStr;
 
 use kernels::miner::KERNEL;
-use nockapp::kernel::checkpoint::JamPaths;
 use nockapp::kernel::form::Kernel;
 use nockapp::nockapp::driver::{IODriverFn, NockAppHandle, PokeResult};
 use nockapp::nockapp::wire::Wire;
 use nockapp::nockapp::NockAppError;
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::{AtomExt, NounExt};
+use nockapp::save::SaveableCheckpoint;
 use nockvm::noun::{Atom, D, NO, T, YES};
 use nockvm_macros::tas;
 use tempfile::tempdir;
@@ -161,16 +161,13 @@ pub fn create_mining_driver(
 }
 
 pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
-    let snapshot_dir =
-        tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
-            .await
-            .expect("Failed to create temporary directory");
+    tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
+        .await
+        .expect("Failed to create temporary directory");
     let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
-    let snapshot_path_buf = snapshot_dir.path().to_path_buf();
-    let jam_paths = JamPaths::new(snapshot_dir.path());
     // Spawns a new std::thread for this mining attempt
     let kernel =
-        Kernel::load_with_hot_state_huge(snapshot_path_buf, jam_paths, KERNEL, &hot_state, false)
+        Kernel::<SaveableCheckpoint>::load_with_hot_state_huge(KERNEL, None, &hot_state, false)
             .await
             .expect("Could not load mining kernel");
     let effects_slab = kernel

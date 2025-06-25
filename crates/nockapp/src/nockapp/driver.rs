@@ -164,7 +164,7 @@ impl NockAppHandle {
     #[instrument(skip(self))]
     pub async fn next_effect(&self) -> Result<NounSlab, NockAppError> {
         let mut effect_receiver = self.effect_receiver.lock().await;
-        tracing::debug!("Waiting for recv on next effect");
+        tracing::trace!("Waiting for recv on next effect");
 
         match effect_receiver.recv().await {
             Ok(effect) => {

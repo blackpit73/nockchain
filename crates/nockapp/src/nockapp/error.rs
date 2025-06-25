@@ -1,3 +1,4 @@
+use crate::nockapp::save::CheckpointError;
 use crate::noun::slab::CueError;
 use crate::CrownError;
 use thiserror::Error;
@@ -56,6 +57,8 @@ pub enum NockAppError {
     SendError(#[from] tokio::sync::watch::error::SendError<u64>),
     #[error("Config error: {0}")]
     ConfigError(#[from] config::ConfigError),
+    #[error("Checkpoing error: {0}")]
+    CheckpointError(#[from] CheckpointError),
 }
 
 impl From<TrySendError<IOAction>> for NockAppError {

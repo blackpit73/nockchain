@@ -192,7 +192,7 @@ mod test {
     #[cfg_attr(miri, ignore)]
     fn test_npc_poke_wire_format() {
         let wire = NpcWire::Poke(123).to_wire();
-        let mut slab = NounSlab::new();
+        let mut slab: NounSlab = NounSlab::new();
         let wire_noun = wire_to_noun(&mut slab, &wire);
         slab.set_root(wire_noun);
         // Check the wire format

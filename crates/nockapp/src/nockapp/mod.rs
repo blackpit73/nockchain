@@ -1,7 +1,9 @@
 // pub(crate) mod actors;
 pub mod driver;
 pub mod error;
+pub mod export;
 pub(crate) mod metrics;
+pub mod save;
 pub mod test;
 pub mod wire;
 
@@ -13,15 +15,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use futures::FutureExt;
-use tokio::io::AsyncWriteExt;
+use tokio::select;
 use tokio::sync::{broadcast, mpsc, Mutex, OwnedMutexGuard};
 use tokio::time::{interval, Duration, Interval};
-use tokio::{fs, select};
 use tokio_util::task::TaskTracker;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::kernel::form::Kernel;
-use crate::noun::slab::NounSlab;
+use crate::noun::slab::{Jammer, NockJammer, NounSlab};
+use crate::save::{SaveableCheckpoint, Saver};
 
 use driver::{IOAction, IODriverFn, NockAppHandle, PokeResult};
 use metrics::*;
@@ -51,9 +53,9 @@ pub const EXIT_SIGQUIT: usize = 131;
 /// SIGTERM: Termination signal from OS or process manager
 pub const EXIT_SIGTERM: usize = 143;
 
-pub struct NockApp {
+pub struct NockApp<J = NockJammer> {
     /// Nock kernel
-    pub(crate) kernel: Kernel,
+    pub(crate) kernel: Kernel<SaveableCheckpoint>,
     /// Current join handles for IO drivers (parallel to `drivers`)
     pub(crate) tasks: tokio_util::task::TaskTracker,
     /// Exit state object
@@ -64,10 +66,6 @@ pub struct NockApp {
     exit_status: AtomicBool,
     /// Abort immediately on signal
     abort_immediately: AtomicBool,
-    /// Save event num sender
-    watch_send: Arc<Mutex<tokio::sync::watch::Sender<u64>>>,
-    /// Save event num receiver
-    watch_recv: tokio::sync::watch::Receiver<u64>,
     /// IO action channel
     action_channel: mpsc::Receiver<IOAction>,
     /// IO action channel sender
@@ -77,7 +75,7 @@ pub struct NockApp {
     /// Save interval
     save_interval: Interval,
     /// Mutex to ensure only one save at a time
-    pub(crate) save_mutex: Arc<Mutex<()>>,
+    pub(crate) save_mutex: Arc<Mutex<Saver<J>>>,
     /// Shutdown oneshot sender
     pub npc_socket_path: Option<PathBuf>,
     metrics: Arc<NockAppMetrics>,
@@ -144,9 +142,28 @@ impl NockAppExit {
     }
 }
 
-impl NockApp {
+impl<J: Jammer + Send + 'static> NockApp<J> {
     /// This constructs a Tokio interval, even though it doesn't look like it, a Tokio runtime is _required_.
-    pub async fn new(mut kernel: Kernel, save_interval_duration: Duration) -> Self {
+    pub async fn new<F, U, E>(
+        kernel_from_checkpoint: F,
+        snapshot_path: &PathBuf,
+        save_interval_duration: Duration,
+    ) -> Result<Self, NockAppError>
+    where
+        F: FnOnce(Option<SaveableCheckpoint>) -> U,
+        U: Future<Output = Result<Kernel<SaveableCheckpoint>, E>>,
+        NockAppError: From<E>,
+    {
+        // let cancel_token = tokio_util::sync::CancellationToken::new();
+        let metrics = Arc::new(
+            NockAppMetrics::register(gnort::global_metrics_registry())
+                .expect("Failed to register metrics!"),
+        );
+        let (saver, checkpoint) = Saver::<J>::try_load(snapshot_path, Some(metrics.clone()))
+            .await
+            .expect("Failed to set up snapshotting");
+        let save_mutex = Arc::new(Mutex::new(saver));
+        let mut kernel = kernel_from_checkpoint(checkpoint).await?;
         // important: we are tracking this separately here because
         // what matters is the last poke *we* received an ack for. Using
         // the Arc in the serf would result in a race condition!
@@ -160,17 +177,9 @@ impl NockApp {
         let tasks = TaskTracker::new();
         let mut save_interval = interval(save_interval_duration);
         save_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip); // important so we don't stack ticks when lagging
-        let save_mutex = Arc::new(Mutex::new(()));
-        let (watch_send, watch_recv) =
-            tokio::sync::watch::channel(kernel.serf.event_number.load(Ordering::SeqCst));
-        let watch_send = Arc::new(Mutex::new(watch_send.clone()));
         let exit_status = AtomicBool::new(false);
         let abort_immediately = AtomicBool::new(false);
-        // let cancel_token = tokio_util::sync::CancellationToken::new();
-        let metrics = Arc::new(
-            NockAppMetrics::register(gnort::global_metrics_registry())
-                .expect("Failed to register metrics!"),
-        );
+
         kernel
             .provide_metrics(metrics.clone())
             .await
@@ -180,15 +189,13 @@ impl NockApp {
             .expect("Failed to create signal handler");
 
         let (exit, exit_recv) = NockAppExit::new();
-        Self {
+        Ok(Self {
             kernel,
             tasks,
             abort_immediately,
             exit,
             exit_recv,
             exit_status,
-            watch_send,
-            watch_recv,
             action_channel,
             action_channel_sender,
             effect_broadcast,
@@ -198,7 +205,7 @@ impl NockApp {
             npc_socket_path: None,
             metrics,
             signals,
-        }
+        })
     }
 
     pub fn get_handle(&self) -> NockAppHandle {
@@ -263,42 +270,20 @@ impl NockApp {
     pub(crate) async fn save_f(
         &mut self,
         f: impl std::future::Future<Output = ()> + Send + 'static,
-        save_permit: OwnedMutexGuard<()>,
+        mut save_permit: OwnedMutexGuard<Saver<J>>,
     ) -> Result<tokio::task::JoinHandle<NockAppResult>, NockAppError> {
-        let toggle = self.kernel.serf.buffer_toggle.clone();
-        let jam_paths = self.kernel.serf.jam_paths.clone();
-        let send_lock = self.watch_send.clone();
         let checkpoint_fut = self.kernel.checkpoint();
+        let metrics = self.metrics.clone();
 
+        trace!("Spawning save task from save_f");
         let join_handle = self.tasks.spawn(async move {
-            let checkpoint = checkpoint_fut.await?;
-            let bytes = checkpoint.encode()?;
             f.await;
-            let path = if toggle.load(Ordering::SeqCst) {
-                &jam_paths.1
-            } else {
-                &jam_paths.0
-            };
-            let mut file = fs::File::create(path)
-                .await
-                .map_err(NockAppError::SaveError)?;
+            trace!("Save task from save_f: f.await done");
+            let checkpoint = checkpoint_fut.await?;
+            trace!("Save task from save_f: checkpoint_fut.await done");
+            save_permit.save(checkpoint, metrics).await?;
+            trace!("Save task from save_f: save_permit.save done");
 
-            file.write_all(&bytes)
-                .await
-                .map_err(NockAppError::SaveError)?;
-            file.sync_all().await.map_err(NockAppError::SaveError)?;
-
-            trace!(
-                "Write to {:?} successful, checksum: {}, event: {}",
-                path.display(),
-                checkpoint.checksum,
-                checkpoint.event_num
-            );
-
-            // Flip toggle after successful write
-            toggle.store(!toggle.load(Ordering::SeqCst), Ordering::SeqCst);
-            let send = send_lock.lock().await;
-            send.send(checkpoint.event_num)?;
             drop(save_permit);
             Ok::<(), NockAppError>(())
         });
@@ -308,13 +293,15 @@ impl NockApp {
     }
 
     /// Except in tests, save should only be called by the permit handler.
-    pub(crate) async fn save(&mut self, save_permit: OwnedMutexGuard<()>) -> NockAppResult {
+    pub(crate) async fn save(&mut self, save_permit: OwnedMutexGuard<Saver<J>>) -> NockAppResult {
         let _join_handle = self.save_f(async {}, save_permit).await?;
         Ok(())
     }
 
     pub async fn save_locked(&mut self) -> NockAppResult {
+        trace!("save_locked: locking save_mutex");
         let guard = self.save_mutex.clone().lock_owned().await;
+        trace!("save_locked: save_mutex locked");
         self.save(guard).await.map_err(|e| {
             error!("Failed to save: {:?}", e);
             e
@@ -430,6 +417,7 @@ impl NockApp {
     }
 
     #[instrument(skip(self))]
+    #[allow(dead_code)]
     fn cleanup_socket(&self) {
         // Clean up npc socket file if it exists
         Self::cleanup_socket_(&self.npc_socket_path);
@@ -438,10 +426,12 @@ impl NockApp {
     async fn work(&mut self) -> Result<NockAppRun, NockAppError> {
         // Track SIGINT (C-c) presses for immediate termination
         // Fires when there is a save interval tick *and* an available permit in the save semaphore
-        let save_ready = self
-            .save_interval
-            .tick()
-            .then(|_| self.save_mutex.clone().lock_owned());
+        let save_ready = self.save_interval.tick().then(|_| async {
+            trace!("save_interval tick: locking save_mutex");
+            let guard = self.save_mutex.clone().lock_owned().await;
+            trace!("save_interval tick: save_mutex locked");
+            guard
+        });
         select!(
             exit_status_res = self.exit_recv.recv() => {
                 let Some(exit_status) = exit_status_res else {
@@ -518,7 +508,7 @@ impl NockApp {
                 }
             },
             action_res = self.action_channel.recv() => {
-                debug!("Action channel received");
+                trace!("Action channel received");
                 self.metrics.handle_action.increment();
                 match action_res {
                     Some(action) => {
@@ -537,15 +527,13 @@ impl NockApp {
     #[instrument(skip_all, level = "trace")]
     async fn handle_save_permit_res(
         &mut self,
-        save_guard: OwnedMutexGuard<()>,
+        save_guard: OwnedMutexGuard<Saver<J>>,
     ) -> Result<NockAppRun, NockAppError> {
         //  Check if we should write in the first place
         let curr_event_num = self.kernel.serf.event_number.load(Ordering::SeqCst);
-        let saved_event_num = self.watch_recv.borrow();
-        if curr_event_num <= *saved_event_num {
+        if !save_guard.save_needed(curr_event_num) {
             return Ok(NockAppRun::Pending);
         }
-        drop(saved_event_num);
 
         let res = self.save(save_guard).await;
 
@@ -625,11 +613,6 @@ impl NockApp {
         });
     }
 
-    async fn handle_signal(&mut self, code: usize) -> Result<NockAppRun, NockAppError> {
-        self.kernel.serf.cancel_token.cancel();
-        self.handle_exit(code).await
-    }
-
     // TODO: We should explicitly kick off a save somehow
     // TOOD: :>) spawn a task which awaits the signal stream and if there is a SIGINT, then call std::process::exit(1)
     #[instrument(skip_all)]
@@ -647,6 +630,23 @@ impl NockApp {
             }
         }
 
+        let exit_event_num = self.kernel.serf.event_number.load(Ordering::SeqCst);
+        debug!(
+            "Exit request received, waiting for save checkpoint with event_num {} (code {})",
+            exit_event_num, code
+        );
+
+        let waiter_mutex_arc = self.save_mutex.clone();
+        let waiter = {
+            trace!("Waiting for save event_num {}", exit_event_num);
+            let mut guard = waiter_mutex_arc.lock().await;
+            trace!("Locked save mutex for event_num {}", exit_event_num);
+            let oneshot = guard.wait_for_snapshot(exit_event_num).await;
+            trace!("Acquired the oneshot for snapshot on save event_num {}", exit_event_num);
+            drop(guard);
+            oneshot
+        };
+
         // Force an immediate save to ensure we have the latest state
         info!(
             "Exit signal received with code {}, forcing immediate save",
@@ -659,13 +659,6 @@ impl NockApp {
             );
         }
 
-        let exit_event_num = self.kernel.serf.event_number.load(Ordering::SeqCst);
-        debug!(
-            "Exit request received, waiting for save checkpoint with event_num {} (code {})",
-            exit_event_num, code
-        );
-
-        let mut recv = self.watch_recv.clone();
         // let cancel_token = self.cancel_token.clone();
         let exit = self.exit.clone();
         // self.tasks.close();
@@ -675,15 +668,12 @@ impl NockApp {
         let socket_path = self.npc_socket_path.clone();
         // TODO: Break this out as a separate select! handler with no spawn
         self.tasks.spawn(async move {
-            recv.wait_for(|&new| {
-                // assert!(
-                //     new <= exit_event_num,
-                //     "new {new:?} exit_event_num {exit_event_num:?}"
-                // );
-                new >= exit_event_num
-            })
-            .await
-            .expect("Failed to wait for saves to catch up to exit_event_num");
+            debug!("Waiting for save event_num {}", exit_event_num);
+            let result = waiter.await;
+            if let Err(e) = result {
+                error!("Error waiting for snapshot: {e}");
+                panic!("Error waiting for snapshot: {e}");
+            };
             Self::cleanup_socket_(&socket_path);
             debug!("Save event_num reached, finishing with code {}", code);
             let shutdown_result = if code == EXIT_OK {

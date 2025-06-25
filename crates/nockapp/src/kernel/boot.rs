@@ -1,11 +1,14 @@
-use crate::kernel::checkpoint::JamPaths;
+use crate::export::ExportedState;
 use crate::kernel::form::Kernel;
+use crate::noun::slab::Jammer;
+use crate::save::SaveableCheckpoint;
+use crate::utils::error::{CrownError, ExternalError};
 use crate::{default_data_dir, NockApp};
 use chrono;
-use clap::{arg, command, ColorChoice, Parser};
+use clap::{arg, command, ColorChoice, Parser, ValueEnum};
 use nockvm::jets::hot::HotEntry;
-use std::fs;
 use std::path::PathBuf;
+use tokio::fs;
 use tracing::{debug, info, Level};
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
@@ -14,8 +17,15 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
 
-const DEFAULT_SAVE_INTERVAL: u64 = 60000;
+const DEFAULT_SAVE_INTERVAL: u64 = 120000;
 const DEFAULT_LOG_FILTER: &str = "info,slogger=trace";
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum NockStackSize {
+    Normal,
+    Big,
+    Huge,
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(about = "boot a nockapp", author, version, color = ColorChoice::Auto)]
@@ -51,12 +61,20 @@ pub struct Cli {
         help = "Path to export the kernel state as a jam file in the ExportedState format."
     )]
     pub export_state_jam: Option<String>,
+
+    #[arg(
+        long,
+        help = "Nock stack size to use",
+        value_enum,
+        default_value_t = NockStackSize::Normal
+    )]
+    pub stack_size: NockStackSize,
 }
 
 /// Result of setting up a NockApp
-pub enum SetupResult {
+pub enum SetupResult<J> {
     /// A fully initialized NockApp
-    App(NockApp),
+    App(NockApp<J>),
     /// State was exported successfully
     ExportedState,
 }
@@ -69,6 +87,7 @@ pub fn default_boot_cli(new: bool) -> Cli {
         color: ColorChoice::Auto,
         state_jam: None,
         export_state_jam: None,
+        stack_size: NockStackSize::Normal,
     }
 }
 
@@ -200,13 +219,13 @@ pub fn init_default_tracing(cli: &Cli) {
     }
 }
 
-pub async fn setup(
+pub async fn setup<J: Jammer + Send + 'static>(
     jam: &[u8],
     cli: Option<Cli>,
     hot_state: &[HotEntry],
     name: &str,
     data_dir: Option<PathBuf>,
-) -> Result<NockApp, Box<dyn std::error::Error>> {
+) -> Result<NockApp<J>, Box<dyn std::error::Error>> {
     let result = setup_(
         jam,
         cli.unwrap_or_else(|| default_boot_cli(false)),
@@ -224,13 +243,13 @@ pub async fn setup(
     }
 }
 
-pub async fn setup_(
+pub async fn setup_<J: Jammer + Send + 'static>(
     jam: &[u8],
     cli: Cli,
     hot_state: &[HotEntry],
     name: &str,
     data_dir: Option<PathBuf>,
-) -> Result<SetupResult, Box<dyn std::error::Error>> {
+) -> Result<SetupResult<J>, Box<dyn std::error::Error>> {
     let data_dir = if let Some(data_path) = data_dir.clone() {
         data_path.join(name)
     } else {
@@ -254,43 +273,64 @@ pub async fn setup_(
         debug!("Deleted existing checkpoint directory: {:?}", jams_dir);
     }
 
-    let jam_paths = JamPaths::new(&jams_dir);
     info!("kernel: starting");
     debug!("kernel: pma directory: {:?}", pma_dir);
-    debug!(
-        "kernel: jam buffer paths: {:?}, {:?}",
-        jam_paths.0, jam_paths.1
-    );
+    debug!("kernel: snapshots directory: {:?}", jams_dir);
 
-    let mut kernel = if let Some(state_path) = cli.state_jam {
-        let state_bytes = fs::read(&state_path)?;
-        debug!("kernel: loading state from jam file: {:?}", state_path);
-        Kernel::load_with_kernel_state(pma_dir, jam_paths, jam, &state_bytes, hot_state, cli.trace)
-            .await?
-    } else {
-        Kernel::load_with_hot_state(pma_dir, jam_paths, jam, hot_state, cli.trace).await?
+    let kernel_f = async |checkpoint| {
+        let kernel: Kernel<SaveableCheckpoint> = match cli.stack_size {
+            NockStackSize::Normal => {
+                Kernel::load_with_hot_state(jam, checkpoint, hot_state, cli.trace).await?
+            }
+            NockStackSize::Big => {
+                Kernel::load_with_hot_state_big(jam, checkpoint, hot_state, cli.trace).await?
+            }
+            NockStackSize::Huge => {
+                Kernel::load_with_hot_state_huge(jam, checkpoint, hot_state, cli.trace).await?
+            }
+        };
+        let res: Result<Kernel<SaveableCheckpoint>, CrownError<ExternalError>> = Ok(kernel);
+        res
     };
-
-    if let Some(export_path) = cli.export_state_jam.clone() {
-        export_kernel_state(&mut kernel, &export_path).await?;
-        return Ok(SetupResult::ExportedState);
-    }
 
     let save_interval = std::time::Duration::from_millis(cli.save_interval);
 
-    let app = NockApp::new(kernel, save_interval).await;
+    let app: NockApp<J> = NockApp::new(kernel_f, &jams_dir, save_interval).await?;
+
+    if let Some(export_path) = cli.export_state_jam.clone() {
+        export_kernel_state(&app.kernel, &export_path).await?;
+        return Ok(SetupResult::ExportedState);
+    }
+
+    if let Some(import_path) = cli.state_jam.clone() {
+        import_kernel_state(&app.kernel, &import_path).await?;
+    }
 
     Ok(SetupResult::App(app))
 }
 
 /// Exports the kernel state to a jam file at the specified path
-async fn export_kernel_state(
-    kernel: &mut Kernel,
+async fn export_kernel_state<C>(
+    kernel: &Kernel<C>,
     export_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!("Extracting kernel state to file: {:?}", export_path);
-    let state_bytes = kernel.create_state_bytes().await?;
-    fs::write(export_path, state_bytes)?;
+    let kernel_state = kernel.export().await?;
+    let exported_state = ExportedState::from_loadstate(kernel_state);
+    let state_bytes = exported_state.encode()?;
+    fs::write(export_path, state_bytes).await?;
     info!("Successfully exported kernel state to: {:?}", export_path);
+    Ok(())
+}
+
+/// Imports the kernel state from a jam file at the specified path
+async fn import_kernel_state<C>(
+    kernel: &Kernel<C>,
+    import_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let state_bytes = fs::read(import_path).await?;
+    let exported_state = ExportedState::decode(&state_bytes)?;
+    let kernel_state = exported_state.to_loadstate()?;
+    kernel.import(kernel_state).await?;
+    info!("Successfully imported kernel state from: {:?}", import_path);
     Ok(())
 }

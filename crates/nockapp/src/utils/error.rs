@@ -72,9 +72,17 @@ pub enum CrownError<T = ExternalError> {
     #[error("queue")]
     QueueError(#[from] QueueErrorWrapper),
     #[error("Serf MPSC error")]
-    SerfMPSCError(#[from] tokio::sync::mpsc::error::SendError<crate::kernel::form::SerfAction>),
+    SerfMPSCError(),
     #[error("oneshot channel error")]
     OneshotChannelError(#[from] tokio::sync::oneshot::error::RecvError),
+}
+
+impl<C> From<tokio::sync::mpsc::error::SendError<crate::kernel::form::SerfAction<C>>>
+    for CrownError
+{
+    fn from(_: tokio::sync::mpsc::error::SendError<crate::kernel::form::SerfAction<C>>) -> Self {
+        CrownError::SerfMPSCError()
+    }
 }
 
 #[derive(Debug)]
@@ -89,13 +97,13 @@ impl std::fmt::Display for SwordError {
     }
 }
 
-impl From<nockvm::interpreter::Error> for CrownError {
+impl<C> From<nockvm::interpreter::Error> for CrownError<C> {
     fn from(e: nockvm::interpreter::Error) -> Self {
         CrownError::InterpreterError(SwordError(e))
     }
 }
 
-impl From<nockvm::jets::JetErr> for CrownError {
+impl<C> From<nockvm::jets::JetErr> for CrownError<C> {
     fn from(e: nockvm::jets::JetErr) -> Self {
         CrownError::InterpreterError(SwordError(nockvm::interpreter::Error::from(e)))
     }
@@ -113,7 +121,7 @@ impl std::error::Error for QueueErrorWrapper {
     }
 }
 
-impl From<yaque::TrySendError<Vec<u8>>> for CrownError {
+impl<C> From<yaque::TrySendError<Vec<u8>>> for CrownError<C> {
     fn from(e: yaque::TrySendError<Vec<u8>>) -> Self {
         CrownError::QueueError(QueueErrorWrapper(e))
     }
@@ -134,14 +142,14 @@ impl std::fmt::Display for NounError {
     }
 }
 
-impl From<nockvm::noun::Error> for CrownError {
+impl<C> From<nockvm::noun::Error> for CrownError<C> {
     fn from(e: nockvm::noun::Error) -> Self {
         CrownError::Noun(NounError(e))
     }
 }
 
-impl<T, E: Into<CrownError>> IntoCrownError<T> for core::result::Result<T, E> {
-    fn nockapp(self) -> core::result::Result<T, CrownError> {
+impl<C, T, E: Into<CrownError<C>>> IntoCrownError<C, T> for core::result::Result<T, E> {
+    fn nockapp(self) -> core::result::Result<T, CrownError<C>> {
         match self {
             Ok(val) => Ok(val),
             Err(e) => Err(e.into()),
@@ -149,8 +157,8 @@ impl<T, E: Into<CrownError>> IntoCrownError<T> for core::result::Result<T, E> {
     }
 }
 
-pub trait IntoCrownError<T> {
-    fn nockapp(self) -> core::result::Result<T, CrownError>;
+pub trait IntoCrownError<C, T> {
+    fn nockapp(self) -> core::result::Result<T, CrownError<C>>;
 }
 
 pub type Result<V, E = CrownError<ExternalError>> = std::result::Result<V, E>;

@@ -18,7 +18,7 @@ use tokio::net::UnixListener;
 pub mod colors;
 
 use colors::*;
-use nockapp::noun::slab::NounSlab;
+use nockapp::noun::slab::{Jammer, NounSlab};
 use nockvm::jets::hot::HotEntry;
 use nockvm::noun::{D, T, YES};
 use nockvm_macros::tas;
@@ -178,18 +178,18 @@ fn load_keypair(keypair_path: &Path, force_new: bool) -> Result<Keypair, Box<dyn
 }
 
 #[instrument(skip(kernel_jam, hot_state))]
-pub async fn init_with_kernel(
+pub async fn init_with_kernel<J: Jammer + Send + 'static>(
     cli: Option<config::NockchainCli>,
     kernel_jam: &[u8],
     hot_state: &[HotEntry],
-) -> Result<NockApp, Box<dyn Error>> {
+) -> Result<NockApp<J>, Box<dyn Error>> {
     welcome();
 
     if let Some(cli) = &cli {
         cli.validate()?;
     }
 
-    let mut nockapp = boot::setup(
+    let mut nockapp = boot::setup::<J>(
         kernel_jam,
         cli.as_ref().map(|c| c.nockapp_cli.clone()),
         hot_state,

@@ -13,7 +13,7 @@ bazel_build = []
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
-bitvec = { workspace = true }
+bitvec = { workspace = true, default-features = false, features = ["alloc"] }
 blake3 = { workspace = true }
 clap = { workspace = true, features = ["derive", "cargo", "color", "env"] }
 dirs = { workspace = true }

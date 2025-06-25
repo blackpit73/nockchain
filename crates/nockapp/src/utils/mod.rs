@@ -36,8 +36,11 @@ pub const NOCK_STACK_1KB: usize = 1 << 7;
 // nock stack size
 pub const NOCK_STACK_SIZE: usize = (NOCK_STACK_1KB << 10 << 10) * 8; // 8GB
 
+// BIG nock stack size
+pub const NOCK_STACK_SIZE_BIG: usize = (NOCK_STACK_1KB << 10 << 10) * 32; // 32GB
+
 // HUGE nock stack size
-pub const NOCK_STACK_SIZE_HUGE: usize = (NOCK_STACK_1KB << 10 << 10) * 128; // 32GB
+pub const NOCK_STACK_SIZE_HUGE: usize = (NOCK_STACK_1KB << 10 << 10) * 128; // 128GB
 
 /**
  *   ::  +from-unix: unix seconds to @da
