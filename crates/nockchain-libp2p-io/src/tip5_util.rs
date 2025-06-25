@@ -80,7 +80,7 @@ mod tests {
     fn test_tip5_hash_to_base58() {
         use nockvm::noun::Atom;
         // Create a NounSlab to use as an allocator
-        let mut slab = NounSlab::new();
+        let mut slab: NounSlab = NounSlab::new();
 
         // Test case 1: Simple tuple [1 2 3 4 5]
         let tuple1 = T(&mut slab, &[D(1), D(2), D(3), D(4), D(5)]);

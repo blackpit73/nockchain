@@ -7,7 +7,8 @@ use libp2p::swarm::ConnectionId;
 use libp2p::{Multiaddr, PeerId};
 use nockapp::noun::slab::NounSlab;
 use nockapp::{AtomExt, NockAppError, NounExt};
-use nockvm::noun::Noun;
+use nockvm::noun::{Noun, D};
+use nockvm_macros::tas;
 use tracing::{info, trace, warn};
 
 use crate::metrics::NockchainP2PMetrics;
@@ -60,6 +61,7 @@ pub struct MessageTracker {
     pub tx_cache: BTreeMap<String, NounSlab>,
     pub elders_cache: BTreeMap<String, NounSlab>,
     pub elders_negative_cache: BTreeSet<String>,
+    pub seen_elders: BTreeSet<String>,
     pub first_negative: u64,
 }
 
@@ -78,6 +80,7 @@ impl MessageTracker {
             tx_cache: BTreeMap::new(),
             elders_cache: BTreeMap::new(),
             elders_negative_cache: BTreeSet::new(),
+            seen_elders: BTreeSet::new(),
             first_negative: 0,
         }
     }
@@ -327,6 +330,62 @@ impl MessageTracker {
     }
 }
 
+const POKE_VERSION: u64 = 0;
+
+#[derive(Debug, Clone)]
+pub enum NockchainFact {
+    // [%heard-block p=page:dt] with poke slab
+    HeardBlock(String, NounSlab),
+    // [%heard-elders p=[oldest=page-number:dt ids=(list block-id:dt)]] with poke slab
+    HeardElders(u64, Vec<String>, NounSlab),
+    // [%heard-tx p=raw-tx:dt] with poke slab
+    HeardTx(String, NounSlab),
+}
+
+impl NockchainFact {
+    pub fn from_noun_slab(slab: &NounSlab) -> Result<Self, NockAppError> {
+        let mut poke_slab = NounSlab::new();
+
+        poke_slab.copy_from_slab(slab);
+        poke_slab.modify(|response_noun| vec![D(tas!(b"fact")), D(POKE_VERSION), response_noun]);
+
+        let noun = unsafe { slab.root() };
+        let head = noun.as_cell()?.head();
+
+        if head.eq_bytes(b"heard-block") {
+            let page = noun.as_cell()?.tail();
+            let block_id = page.as_cell()?.head();
+            let block_id_str = tip5_hash_to_base58(block_id)?;
+            Ok(NockchainFact::HeardBlock(block_id_str, poke_slab))
+        } else if head.eq_bytes(b"heard-tx") {
+            let raw_tx = noun.as_cell()?.tail();
+            let tx_id = raw_tx.as_cell()?.head();
+            let tx_id_str = tip5_hash_to_base58(tx_id)?;
+            Ok(NockchainFact::HeardTx(tx_id_str, poke_slab))
+        } else if head.eq_bytes(b"heard-elders") {
+            let elders_dat = noun.as_cell()?.tail();
+            let oldest = elders_dat.as_cell()?.head().as_atom()?.as_u64()?;
+            let elder_ids = elders_dat.as_cell()?.tail();
+            let elder_id_strings: Result<Vec<String>, nockapp::NockAppError> = elder_ids
+                .list_iter()
+                .map(|id_noun| tip5_hash_to_base58(id_noun))
+                .collect();
+            Ok(NockchainFact::HeardElders(
+                oldest, elder_id_strings?, poke_slab,
+            ))
+        } else {
+            Err(NockAppError::OtherError)
+        }
+    }
+    pub fn fact_poke(&self) -> &NounSlab {
+        match self {
+            Self::HeardBlock(_, slab) => &slab,
+            Self::HeardTx(_, slab) => &slab,
+            Self::HeardElders(_, _, slab) => &slab,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum NockchainDataRequest {
     BlockByHeight(u64),                   // Height requested
@@ -407,7 +466,7 @@ mod tests {
         let peer_id = PeerId::random();
 
         // Create a block ID as [1 2 3 4 5]
-        let mut slab = NounSlab::new();
+        let mut slab: NounSlab = NounSlab::new();
         let block_id_tuple = T(&mut slab, &[D(1), D(2), D(3), D(4), D(5)]);
 
         // Add the block ID
@@ -462,7 +521,7 @@ mod tests {
         let peer_id = PeerId::random();
 
         // Create a block ID
-        let mut slab = NounSlab::new();
+        let mut slab: NounSlab = NounSlab::new();
         let block_id_tuple = T(&mut slab, &[D(1), D(2), D(3), D(4), D(5)]);
 
         // Track the block ID
@@ -503,7 +562,7 @@ mod tests {
         println!("Original base58: {}", base58_str);
 
         // Create a NounSlab and store the base58 string as an Atom
-        let mut slab = NounSlab::new();
+        let mut slab: NounSlab = NounSlab::new();
         let peer_id_atom = Atom::from_value(&mut slab, base58_str.as_bytes())
             .expect("Failed to create peer ID atom");
 
@@ -533,7 +592,7 @@ mod tests {
         let peer_id2 = PeerId::random();
 
         // Create a block ID
-        let mut slab = NounSlab::new();
+        let mut slab: NounSlab = NounSlab::new();
         let block_id_tuple = T(&mut slab, &[D(1), D(2), D(3), D(4), D(5)]);
 
         // First, try to add a peer to a non-existent block ID
@@ -593,7 +652,7 @@ mod tests {
         let peer_id2 = PeerId::random();
 
         // Create a block ID
-        let mut slab = NounSlab::new();
+        let mut slab: NounSlab = NounSlab::new();
         let block_id_tuple = T(&mut slab, &[D(1), D(2), D(3), D(4), D(5)]);
         let block_id_str = tip5_hash_to_base58(block_id_tuple).unwrap_or_else(|_| {
             panic!(
@@ -675,7 +734,7 @@ mod tests {
         let peer_id2 = PeerId::random();
 
         // Create a block ID
-        let mut slab = NounSlab::new();
+        let mut slab: NounSlab = NounSlab::new();
         let block_id_tuple = T(&mut slab, &[D(1), D(2), D(3), D(4), D(5)]);
 
         // Create another block ID that both peers will share

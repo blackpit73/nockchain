@@ -82,7 +82,7 @@ pub async fn hoonc_data_dir() -> PathBuf {
 /// - A noun
 pub async fn build_and_kick_jam(
     context: &mut Context,
-    path: &str,
+    path: &PathBuf,
     deps_dir: PathBuf,
     out_dir: Option<PathBuf>,
 ) -> Noun {
@@ -107,32 +107,35 @@ pub async fn build_and_kick_jam(
 
 pub async fn save_generator(
     context: &mut Context,
-    path: &str,
+    path: &PathBuf,
     deps_dir: PathBuf,
     out_dir: Option<PathBuf>,
 ) -> Result<(), Error> {
-    let cli = default_boot_cli(true);
-    boot::init_default_tracing(&cli);
-    let kicked = build_and_kick_jam(context, path, deps_dir, out_dir.clone()).await;
+    let temp_dir = tempfile::TempDir::new()?;
+    let out_path = temp_dir.path().join("out.jam");
+    let kicked = build_and_kick_jam(context, path, deps_dir, Some(out_path)).await;
     let jammed = kicked.jam_self(&mut context.stack);
 
-    let file_name = Path::new(path)
-        .file_stem()
-        .unwrap_or_else(|| OsStr::new("generator"))
-        .to_string_lossy()
-        .to_string();
-    let output_file = out_dir
-        .clone()
-        .unwrap_or_else(|| current_dir().expect("Failed to get current directory"))
-        .join(format!("{}.jam", file_name));
+    if out_dir.is_some() {
+        let file_name = path
+            .clone()
+            .file_stem()
+            .unwrap_or_else(|| OsStr::new("generator"))
+            .to_string_lossy()
+            .to_string();
+        let output_file = out_dir
+            .clone()
+            .unwrap_or_else(|| current_dir().expect("Failed to get current directory"))
+            .join(format!("{}.jam", file_name));
 
-    if let Some(parent) = output_file.parent() {
-        fs::create_dir_all(parent).await?;
+        if let Some(parent) = output_file.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        fs::write(&output_file, jammed).await?;
+
+        println!("Generator saved to: {}", output_file.display());
     }
-
-    fs::write(&output_file, jammed).await?;
-
-    println!("Generator saved to: {}", output_file.display());
     Ok(())
 }
 /// Builds a jam (serialized Nock noun) from a Hoon source file
@@ -145,13 +148,15 @@ pub async fn save_generator(
 ///
 /// # Parameters
 /// - `entry`: Path to the Hoon source file, relative to the hoon directory
+/// - `deps_dir`: Path to the dependencies directory
+/// - `out_dir`: Optional path to the output directory
 /// - `arbitrary`: Whether to build with arbitrary mode enabled
 /// - `new`: Whether to force a clean build
 ///
 /// # Returns
 /// - A Result containing either the jam bytes or a hoonc error
 pub async fn build_jam(
-    entry: &str,
+    entry: &PathBuf,
     deps_dir: PathBuf,
     out_dir: Option<PathBuf>,
     arbitrary: bool,

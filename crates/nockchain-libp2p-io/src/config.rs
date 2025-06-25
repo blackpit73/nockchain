@@ -30,13 +30,13 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 const IDENTIFY_INTERVAL: Duration = KADEMLIA_BOOTSTRAP_INTERVAL;
 
 /** Maximum number of established *incoming* connections */
-const MAX_ESTABLISHED_INCOMING_CONNECTIONS: u32 = 32;
+const MAX_ESTABLISHED_INCOMING_CONNECTIONS: u32 = 16;
 
 /** Maximum number of established *incoming* connections */
 const MAX_ESTABLISHED_OUTGOING_CONNECTIONS: u32 = 16;
 
 /** Maximum number of established connections */
-const MAX_ESTABLISHED_CONNECTIONS: u32 = 48;
+const MAX_ESTABLISHED_CONNECTIONS: u32 = 32;
 
 /** Maximum number of established connections with a single peer ID */
 const MAX_ESTABLISHED_CONNECTIONS_PER_PEER: u32 = 2;
@@ -53,12 +53,15 @@ const REQUEST_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
 const REQUEST_HIGH_THRESHOLD: u64 = 60;
 const REQUEST_HIGH_RESET: Duration = Duration::from_secs(60);
 
+// Elders debounce
+const ELDERS_DEBOUNCE_RESET: Duration = Duration::from_secs(60);
+
 // ALL PROTOCOLS MUST HAVE UNIQUE VERSIONS
 const REQ_RES_PROTOCOL_VERSION: &str = "/nockchain-1-req-res";
 const KAD_PROTOCOL_VERSION: &str = "/nockchain-1-kad";
 const IDENTIFY_PROTOCOL_VERSION: &str = "/nockchain-1-identify";
 
-const PEER_STORE_RECORD_CAPACITY: usize = 10 * 1024;
+const PEER_STORE_RECORD_CAPACITY: usize = 1024;
 
 /// Configuration struct that allows overriding default constants from environment variables
 #[derive(Debug, Deserialize, Clone)]
@@ -148,6 +151,10 @@ pub struct LibP2PConfig {
     /// This is the interval at which peer status will be logged.
     #[serde(default = "default_peer_status_log_interval_secs")]
     pub peer_status_log_interval_secs: u64,
+
+    /// Interval for debouncing elders
+    #[serde(default = "default_elders_debounce_reset_secs")]
+    pub elders_debounce_reset_secs: u64,
 }
 
 // Default value functions
@@ -214,6 +221,10 @@ fn default_peer_status_log_interval_secs() -> u64 {
     60 // Log peer status every 60 seconds
 }
 
+fn default_elders_debounce_reset_secs() -> u64 {
+    ELDERS_DEBOUNCE_RESET.as_secs() // Reset elders debounce every 60 seconds
+}
+
 // Do _not_ use this default implementation in production code. It's just a fallback.
 // Use from_env() to load from environment variables with sensible defaults.
 impl Default for LibP2PConfig {
@@ -238,6 +249,7 @@ impl Default for LibP2PConfig {
             identify_protocol_version: default_identify_protocol_version(),
             peer_store_record_capacity: default_peer_store_record_capacity(),
             peer_status_log_interval_secs: default_peer_status_log_interval_secs(),
+            elders_debounce_reset_secs: default_elders_debounce_reset_secs(),
         }
     }
 }
@@ -322,5 +334,9 @@ impl LibP2PConfig {
 
     pub fn peer_status_log_interval_secs(&self) -> std::time::Duration {
         Duration::from_secs(self.peer_status_log_interval_secs)
+    }
+
+    pub fn elders_debounce_reset(&self) -> std::time::Duration {
+        Duration::from_secs(self.elders_debounce_reset_secs)
     }
 }

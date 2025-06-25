@@ -39,7 +39,7 @@ use crate::metrics::NockchainP2PMetrics;
 use crate::p2p::*;
 use crate::p2p_util::{
     log_fail2ban_ipv4, log_fail2ban_ipv6, CacheResponse, MessageTracker, NockchainDataRequest,
-    PeerIdExt,
+    NockchainFact, PeerIdExt,
 };
 use crate::tip5_util::tip5_hash_to_base58;
 
@@ -159,8 +159,6 @@ impl<T: 'static> TrackedJoinSet<T> {
     }
 }
 
-const POKE_VERSION: u64 = 0;
-
 #[instrument(skip(keypair, bind, allowed, limits, memory_limits, equix_builder))]
 pub fn make_libp2p_driver(
     keypair: Keypair,
@@ -191,6 +189,7 @@ pub fn make_libp2p_driver(
             let initial_peer_retries = libp2p_config.initial_peer_retries;
             let request_high_threshold = libp2p_config.request_high_threshold;
             let peer_status_log_interval = libp2p_config.peer_status_log_interval_secs();
+            let elders_debounce_reset = libp2p_config.elders_debounce_reset();
             let mut swarm = match crate::p2p::start_swarm(
                 libp2p_config, keypair, bind, allowed, limits, memory_limits,
             ) {
@@ -210,8 +209,13 @@ pub fn make_libp2p_driver(
             let mut join_set = TrackedJoinSet::<Result<(), NockAppError>>::new();
             let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
             let mut kad_bootstrap = tokio::time::interval(kademlia_bootstrap_interval);
+            kad_bootstrap.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut force_peer_dial = tokio::time::interval(force_peer_dial_interval);
+            force_peer_dial.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut reset_request_counts = tokio::time::interval(request_high_reset);
+            reset_request_counts.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            let mut reset_elders_debounce = tokio::time::interval(elders_debounce_reset);
+            reset_elders_debounce.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut nockchain_timer = tokio::time::interval(chain_interval);
             nockchain_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let nockchain_timer_mutex = Arc::new(Mutex::new(()));
@@ -386,6 +390,11 @@ pub fn make_libp2p_driver(
                     _ = reset_request_counts.tick() => {
                         trace!("Resetting request counts");
                         message_tracker.lock().await.reset_requests();
+                    },
+                    _ = reset_elders_debounce.tick() => {
+                        trace!("Resetting elders debounce");
+                        let mut tracker = message_tracker.lock().await;
+                        tracker.seen_elders.clear();
                     },
                     Some(result) = join_set.join_next() => {
                         if let Err(e) = result {
@@ -858,7 +867,20 @@ async fn handle_request_response(
                                 Err(NockAppError::MPSCFullError(act))?
                             }
                             Err(err) => {
-                                metrics.requests_erred.increment();
+                                match data_request {
+                                    NockchainDataRequest::BlockByHeight(height) => {
+                                        debug!("Peek error getting block at height: {:?}", height);
+                                        metrics.requests_erred_block_by_height.increment();
+                                    }
+                                    NockchainDataRequest::EldersById(ref id, _, _) => {
+                                        debug!("Peek error getting elders of id: {:?}", id);
+                                        metrics.requests_erred_elders_by_id.increment();
+                                    }
+                                    NockchainDataRequest::RawTransactionById(ref id, _) => {
+                                        debug!("Peek error getting raw tx with id: {:?}", &id);
+                                        metrics.requests_erred_raw_tx_by_id.increment();
+                                    }
+                                }
                                 trace!("handle_request_response: Error getting response");
                                 Err(err)?
                             }
@@ -904,7 +926,7 @@ async fn handle_request_response(
                                 }
                             }
                         }
-                        NockchainDataRequest::RawTransactionById(id, _) => {
+                        NockchainDataRequest::RawTransactionById(ref id, _) => {
                             let scry_res = unsafe { scry_res_slab.root() };
                             match create_scry_response(scry_res, "heard-tx", &mut res_slab) {
                                 Left(()) => {
@@ -931,6 +953,7 @@ async fn handle_request_response(
                     trace!("handle_request_response: Gossip received");
                     let message_bytes = Bytes::from(message.to_vec());
                     let request_noun = request_slab.cue_into(message_bytes)?;
+                    request_slab.set_root(request_noun);
                     trace!("handle_request_response: Gossip noun parsed");
 
                     let send_response: tokio::task::JoinHandle<Result<(), NockAppError>> =
@@ -944,43 +967,34 @@ async fn handle_request_response(
                         });
 
                     let poke_kernel = tokio::task::spawn(async move {
-                        let head = request_noun.as_cell()?.head();
-                        if head.eq_bytes(b"heard-block") {
-                            let page = request_noun.as_cell()?.tail();
-                            let block_id = page.as_cell()?.head();
-                            let block_id_str = tip5_hash_to_base58(block_id)?;
-                            let tracker = message_tracker.lock().await;
-                            if tracker.seen_blocks.contains(&block_id_str) {
-                                trace!("Block already seen, not processing: {:?}", block_id_str);
-                                metrics.block_seen_cache_hits.increment();
-                                return Ok(());
-                            } else {
-                                trace!("block not seen, processing: {:?}", block_id_str);
-                                metrics.block_seen_cache_misses.increment();
+                        let gossip = NockchainFact::from_noun_slab(&request_slab)?;
+
+                        match gossip {
+                            NockchainFact::HeardBlock(ref id, _) => {
+                                let tracker = message_tracker.lock().await;
+                                if tracker.seen_blocks.contains(id) {
+                                    trace!("Block already seen, not processing: {:?}", id);
+                                    metrics.block_seen_cache_hits.increment();
+                                    return Ok(());
+                                } else {
+                                    trace!("block not seen, processing: {:?}", id);
+                                    metrics.block_seen_cache_misses.increment();
+                                }
                             }
+                            NockchainFact::HeardTx(ref id, _) => {
+                                let tracker = message_tracker.lock().await;
+                                if tracker.seen_txs.contains(id) {
+                                    trace!("Tx already seen, not processing: {:?}", id);
+                                    metrics.tx_seen_cache_hits.increment();
+                                    return Ok(());
+                                } else {
+                                    trace!("tx not seen, processing: {:?}", id);
+                                    metrics.tx_seen_cache_misses.increment();
+                                }
+                            }
+                            NockchainFact::HeardElders(..) => (),
                         }
 
-                        if head.eq_bytes(b"heard-tx") {
-                            let raw_tx = request_noun.as_cell()?.tail();
-                            let tx_id = raw_tx.as_cell()?.head();
-                            let tracker = message_tracker.lock().await;
-                            let tx_id_str = tip5_hash_to_base58(tx_id)?;
-                            if tracker.seen_txs.contains(&tx_id_str) {
-                                trace!("Tx already seen, not processing: {:?}", tx_id_str);
-                                metrics.tx_seen_cache_hits.increment();
-                                return Ok(());
-                            } else {
-                                trace!("tx not seen, processing: {:?}", tx_id_str);
-                                metrics.tx_seen_cache_misses.increment();
-                            }
-                        }
-
-                        let request_fact = prepend_tas(
-                            &mut request_slab,
-                            "fact",
-                            vec![D(POKE_VERSION), request_noun],
-                        )?;
-                        request_slab.set_root(request_fact);
                         let wire = Libp2pWire::Gossip(peer);
 
                         trace!(
@@ -988,15 +1002,44 @@ async fn handle_request_response(
                             wire,
                             nockvm::noun::FullDebugCell(unsafe { &request_slab.root().as_cell()? })
                         );
+
+                        let poke = gossip.fact_poke();
                         match traffic
-                            .poke_high_priority(wire.to_wire(), request_slab)
+                            .poke_high_priority(wire.to_wire(), poke.clone())
                             .await
                         {
-                            Ok(PokeResult::Ack) => {
-                                metrics.gossip_acked.increment();
-                            }
+                            Ok(PokeResult::Ack) => match gossip {
+                                NockchainFact::HeardBlock(..) => {
+                                    metrics.gossip_acked_heard_block.increment();
+                                }
+                                NockchainFact::HeardTx(..) => {
+                                    metrics.gossip_acked_heard_tx.increment();
+                                }
+                                NockchainFact::HeardElders(..) => {
+                                    metrics.gossip_acked_heard_elders.increment();
+                                }
+                            },
                             Ok(PokeResult::Nack) => {
-                                metrics.gossip_nacked.increment();
+                                match gossip {
+                                    NockchainFact::HeardBlock(height, _) => {
+                                        debug!(
+                                            "Poke gossip nacked for heard-block at height: {:?}",
+                                            height
+                                        );
+                                        metrics.gossip_nacked_heard_block.increment();
+                                    }
+                                    NockchainFact::HeardTx(id, _) => {
+                                        debug!("Poke gossip nacked for heard-tx id: {:?}", id);
+                                        metrics.gossip_nacked_heard_tx.increment();
+                                    }
+                                    NockchainFact::HeardElders(oldest, block_ids, _) => {
+                                        debug!(
+                                            "Poke heard-elders nacked for block height {:?} with ancestors {:?}",
+                                            oldest, block_ids
+                                        );
+                                        metrics.gossip_nacked_heard_elders.increment();
+                                    }
+                                };
                                 trace!("handle_request_response: gossip poke nacked");
                                 return Ok(());
                             }
@@ -1008,7 +1051,26 @@ async fn handle_request_response(
                                 return Err(NockAppError::MPSCFullError(act));
                             }
                             Err(err) => {
-                                metrics.gossip_erred.increment();
+                                match gossip {
+                                    NockchainFact::HeardBlock(height, _) => {
+                                        debug!(
+                                            "Poke gossip erred for heard-block at height: {:?}",
+                                            height
+                                        );
+                                        metrics.gossip_erred_heard_block.increment();
+                                    }
+                                    NockchainFact::HeardTx(id, _) => {
+                                        debug!("Poke gossip erred for heard-tx id: {:?}", id);
+                                        metrics.gossip_erred_heard_tx.increment();
+                                    }
+                                    NockchainFact::HeardElders(oldest, block_ids, _) => {
+                                        debug!(
+                                            "Poke heard-elders erred for block height {:?} with ancestors {:?}",
+                                            oldest, block_ids
+                                        );
+                                        metrics.gossip_erred_heard_elders.increment();
+                                    }
+                                };
                                 trace!("handle_request_response: Poke errored");
                                 return Err(err);
                             }
@@ -1027,29 +1089,69 @@ async fn handle_request_response(
                 let mut response_slab = NounSlab::new();
                 let message_bytes = Bytes::from(message.to_vec());
                 let response_noun = response_slab.cue_into(message_bytes)?;
+                response_slab.set_root(response_noun);
+
                 trace!("Received response from peer");
+
+                let response_cell = response_noun.as_cell()?;
+                if response_cell.head().eq_bytes(b"heard-elders") {
+                    let elders_p_cell = response_cell.tail().as_cell()?;
+                    let elders_list_cell = elders_p_cell.tail().as_cell()?;
+                    let top_block_id = tip5_hash_to_base58(elders_list_cell.head())?;
+
+                    let mut tracker = message_tracker.lock().await;
+                    if tracker.seen_elders.contains(&top_block_id) {
+                        return Ok(());
+                    } else {
+                        tracker.seen_elders.insert(top_block_id);
+                    }
+                }
 
                 trace!(
                     "Response noun: {:?}",
                     nockvm::noun::FullDebugCell(&response_noun.as_cell()?)
                 );
-                let response_fact = prepend_tas(
-                    &mut response_slab,
-                    "fact",
-                    vec![D(POKE_VERSION), response_noun],
-                )?;
-                response_slab.set_root(response_fact);
+
+                let response = NockchainFact::from_noun_slab(&response_slab)?;
                 let wire = Libp2pWire::Response(peer);
+                let poke_slab = response.fact_poke();
 
                 match traffic
-                    .poke_high_priority(wire.to_wire(), response_slab)
+                    .poke_high_priority(wire.to_wire(), poke_slab.clone())
                     .await
                 {
-                    Ok(PokeResult::Ack) => {
-                        metrics.responses_acked.increment();
-                    }
+                    Ok(PokeResult::Ack) => match response {
+                        NockchainFact::HeardBlock(..) => {
+                            metrics.responses_acked_heard_block.increment();
+                        }
+                        NockchainFact::HeardTx(..) => {
+                            metrics.responses_acked_heard_tx.increment();
+                        }
+                        NockchainFact::HeardElders(..) => {
+                            metrics.responses_acked_heard_elders.increment();
+                        }
+                    },
                     Ok(PokeResult::Nack) => {
-                        metrics.responses_nacked.increment();
+                        match response {
+                            NockchainFact::HeardBlock(height, _) => {
+                                debug!(
+                                    "Poke response nacked for heard-block at height: {:?}",
+                                    height
+                                );
+                                metrics.responses_nacked_heard_block.increment();
+                            }
+                            NockchainFact::HeardTx(id, _) => {
+                                debug!("Poke response nacked for heard-tx id: {:?}", id);
+                                metrics.responses_nacked_heard_tx.increment();
+                            }
+                            NockchainFact::HeardElders(oldest, block_ids, _) => {
+                                debug!(
+                                    "Poke response heard-elders nacked for block height {:?} with ancestors {:?}",
+                                    oldest, block_ids
+                                );
+                                metrics.responses_nacked_heard_elders.increment();
+                            }
+                        }
                         trace!("handle_request_response: Poke failed");
                         return Ok(());
                     }
@@ -1060,7 +1162,26 @@ async fn handle_request_response(
                     }
                     Err(_) => {
                         trace!("handle_request_response: Error poking with response");
-                        metrics.responses_erred.increment();
+                        match response {
+                            NockchainFact::HeardBlock(height, _) => {
+                                debug!(
+                                    "Poke response error for heard-block at height: {:?}",
+                                    height
+                                );
+                                metrics.responses_erred_heard_block.increment();
+                            }
+                            NockchainFact::HeardTx(id, _) => {
+                                debug!("Poke response error for heard-tx id: {:?}", id);
+                                metrics.responses_erred_heard_tx.increment();
+                            }
+                            NockchainFact::HeardElders(oldest, block_ids, _) => {
+                                debug!(
+                                    "Poke response error for heard-elders for block height {:?} with ancestors {:?}",
+                                    oldest, block_ids
+                                );
+                                metrics.responses_erred_heard_elders.increment();
+                            }
+                        }
                         trace!("Error sending poke")
                     }
                 }
@@ -1246,7 +1367,7 @@ mod tests {
     fn test_request_to_scry_slab() {
         // Test block by-height request
         {
-            let mut slab = NounSlab::new();
+            let mut slab: NounSlab = NounSlab::new();
             let height = 123u64;
             let by_height_tas = make_tas(&mut slab, "by-height");
             let by_height = T(&mut slab, &[by_height_tas.as_noun(), D(height)]);
@@ -1329,7 +1450,7 @@ mod tests {
 
         // Test invalid request (not a cell)
         {
-            let mut slab = NounSlab::new();
+            let mut slab: NounSlab = NounSlab::new();
             slab.set_root(D(123));
             let result = NockchainDataRequest::from_noun(*unsafe { slab.root() })
                 .and_then(|r| request_to_scry_slab(r));
@@ -1338,7 +1459,7 @@ mod tests {
 
         // Test elders request
         {
-            let mut slab = NounSlab::new();
+            let mut slab: NounSlab = NounSlab::new();
             // Create a 5-tuple [1 2 3 4 5] for the block ID
             let five_tuple = T(&mut slab, &[D(1), D(2), D(3), D(4), D(5)]);
 
@@ -1447,7 +1568,7 @@ mod tests {
 
         // Test invalid elders request (not a cell)
         {
-            let mut slab = NounSlab::new();
+            let mut slab: NounSlab = NounSlab::new();
             let invalid_request = T(
                 &mut slab,
                 &[D(tas!(b"request")), D(tas!(b"block")), D(tas!(b"elders"))],
@@ -1684,7 +1805,7 @@ mod tests {
         let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics)));
 
         // Create block ID as [1 2 3 4 5]
-        let mut setup_slab = NounSlab::new();
+        let mut setup_slab: NounSlab = NounSlab::new();
         let block_id_tuple = T(&mut setup_slab, &[D(1), D(2), D(3), D(4), D(5)]);
 
         {
@@ -1786,7 +1907,7 @@ mod tests {
         let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics)));
 
         // Create block IDs
-        let mut setup_slab = NounSlab::new();
+        let mut setup_slab: NounSlab = NounSlab::new();
         // Bad block ID as [1 2 3 4 5]
         let bad_block_id = T(&mut setup_slab, &[D(1), D(2), D(3), D(4), D(5)]);
         // Good block ID as [6 7 8 9 10]
