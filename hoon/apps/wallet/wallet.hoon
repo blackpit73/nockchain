@@ -162,7 +162,7 @@
       [%export-keys ~]
       [%export-master-pubkey ~]
       [%import-master-pubkey =coil]                    ::  base58-encoded pubkey + chain code
-      [%make-tx dat=draft]
+      [%send-tx dat=draft]
       [%list-notes-by-pubkey pubkey=@t]                ::  base58-encoded pubkey
       $:  %simple-spend
           names=(list [first=@t last=@t])              ::  base58-encoded name hashes
@@ -1079,7 +1079,7 @@
       %import-master-pubkey  (do-import-master-pubkey cause)
       %gen-master-privkey    (do-gen-master-privkey cause)
       %gen-master-pubkey     (do-gen-master-pubkey cause)
-      %make-tx               (do-make-tx cause)
+      %send-tx               (do-send-tx cause)
       %list-pubkeys          (do-list-pubkeys cause)
       %sync-run              (do-sync-run cause)
       %show-seedphrase       (do-show-seedphrase cause)
@@ -1438,16 +1438,16 @@
         [%exit 0]
     ==
   ::
-  ++  do-make-tx
+  ++  do-send-tx
     |=  =cause
-    ?>  ?=(%make-tx -.cause)
-    %-  (debug "make-tx: creating raw-tx")
+    ?>  ?=(%send-tx -.cause)
+    %-  (debug "send-tx: creating raw-tx")
     ::  note that new:raw-tx calls +validate already
     =/  raw=raw-tx:transact  (new:raw-tx:transact p.dat.cause)
     =/  tx-id  id.raw
     =/  nock-cause=$>(%fact cause:dumb)
       [%fact %0 %heard-tx raw]
-    %-  (debug "make-tx: made raw-tx, poking over npc")
+    %-  (debug "send-tx: made raw-tx, poking over npc")
     :_  state
     :~
       [%npc 0 %poke nock-cause]

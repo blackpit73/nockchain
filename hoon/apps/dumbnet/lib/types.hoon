@@ -11,6 +11,7 @@
   $%  kernel-state-0
       kernel-state-1
       kernel-state-2
+      kernel-state-3
   ==
 ::
 +$  kernel-state-0
@@ -44,7 +45,17 @@
       d=derived-state-2
       constants=blockchain-constants:dt
   ==
-+$  kernel-state  kernel-state-2
++$  kernel-state-3
+  $:  %3
+      c=consensus-state-3
+      p=pending-state-3
+      a=admin-state-3
+      m=mining-state-3
+    ::
+      d=derived-state-3
+      constants=blockchain-constants:dt
+  ==
++$  kernel-state  kernel-state-3
 ::
 +$  consensus-state-0
   $+  consensus-state-0
@@ -73,7 +84,31 @@
 ::
 +$  consensus-state-2  $+(consensus-state-2 consensus-state-1)
 ::
-+$  consensus-state  consensus-state-2
++$  consensus-state-3
+  $+  consensus-state-3
+  $:  balance=(z-mip block-id:dt nname:dt nnote:dt)
+      txs=(z-mip block-id:dt tx-id:dt tx:dt) ::  fully validated transactions
+      raw-txs=(z-map tx-id:dt raw-tx:dt) :: raw versions of fully validated transactions
+      blocks=(z-map block-id:dt local-page:dt)  ::  fully validated blocks
+    ::
+      heaviest-block=(unit block-id:dt) ::  most recent heaviest block
+    ::
+    ::  min timestamp of block that is a child of this block
+      min-timestamps=(z-map block-id:dt @)
+    ::  this map is used to calculate epoch duration. it is a map of each
+    ::  block-id to the first block-id in that epoch.
+      epoch-start=(z-map block-id:dt block-id:dt)
+    ::  this map contains the expected target for the child
+    ::  of a given block-id.
+      targets=(z-map block-id:dt bignum:bignum:dt)
+    ::
+    ::  Bitcoin block hash for genesis block
+    ::>)  TODO: change face to btc-hash?
+      btc-data=(unit (unit btc-hash:dt))
+      =genesis-seal:dt  ::  desired seal for genesis block
+  ==
+::
++$  consensus-state  consensus-state-3
 ::
 ::  you will not have lost any chain state if you lost pending state, you'd just have to
 ::  request data again from peers
@@ -93,7 +128,9 @@
 ::
 +$  pending-state-2  $+(pending-state-2 pending-state-1)
 ::
-+$  pending-state  pending-state-2
++$  pending-state-3  $+(pending-state-3 pending-state-2)
+::
++$  pending-state  pending-state-3
 ::
 +$  admin-state-0
   $+  admin-state-0
@@ -108,7 +145,9 @@
 ::
 +$  admin-state-2  $+(admin-state-2 admin-state-1)
 ::
-+$  admin-state  admin-state-2
++$  admin-state-3  $+(admin-state-3 admin-state-2)
+::
++$  admin-state  admin-state-3
 ::
 +$  derived-state-0
   $+  derived-state-0
@@ -123,7 +162,9 @@
 ::
 +$  derived-state-2  $+(derived-state-2 derived-state-1)
 ::
-+$  derived-state  derived-state-1
++$  derived-state-3  $+(derived-state-3 derived-state-2)
+::
++$  derived-state  derived-state-3
 ::
 +$  mining-state-0
   $+  mining-state-0
@@ -139,7 +180,9 @@
 ::
 +$  mining-state-2  $+(mining-state-2 mining-state-1)
 ::
-+$  mining-state  mining-state-1
++$  mining-state-3  $+(mining-state-2 mining-state-2)
+::
++$  mining-state  mining-state-3
 ::
 +$  init-phase  $~(%.y ?)
 ::

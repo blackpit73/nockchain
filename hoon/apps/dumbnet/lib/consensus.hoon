@@ -177,6 +177,10 @@
     %+  roll  ~(tap z-in txs.acc)
     |=  [=tx:t txs=_txs.c]
     (~(put z-bi txs) digest.pag id.tx tx)
+  =.  raw-txs.c
+    %+  roll  ~(tap z-in txs.acc)
+    |=  [=tx:t raw-txs=_raw-txs.c]
+    (~(put z-by raw-txs) id.tx -.tx)
   ::  update blocks
   ::
   =.  blocks.c

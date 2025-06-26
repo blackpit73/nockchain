@@ -125,8 +125,7 @@ nockchain-wallet simple-spend \
 nockchain-wallet sign-tx --draft path/to/draft.draft
 
 # Make and broadcast the signed transaction
-nockchain-wallet make-tx --draft path/to/draft.draft
+nockchain-wallet send-tx --draft path/to/draft.draft
 ```
 
 Note: The draft file will be saved in `./drafts/` directory with a `.draft` extension.
-

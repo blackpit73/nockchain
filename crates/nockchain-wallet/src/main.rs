@@ -161,7 +161,7 @@ pub enum Commands {
     },
 
     /// Create a transaction from a draft file
-    MakeTx {
+    SendTx {
         /// Draft file to create transaction from
         #[arg(short, long)]
         draft: String,
@@ -207,7 +207,7 @@ impl Commands {
             Commands::ListNotes => "list-notes",
             Commands::ListNotesByPubkey { .. } => "list-notes-by-pubkey",
             Commands::SimpleSpend { .. } => "simple-spend",
-            Commands::MakeTx { .. } => "make-tx",
+            Commands::SendTx { .. } => "send-tx",
             Commands::UpdateBalance => "update-balance",
             Commands::ExportMasterPubkey => "export-master-pubkey",
             Commands::ImportMasterPubkey { .. } => "import-master-pubkey",
@@ -686,7 +686,7 @@ impl Wallet {
     /// # Arguments
     ///
     /// * `draft_path` - Path to the draft file to create transaction from
-    fn make_tx(draft_path: &str) -> CommandNoun<NounSlab> {
+    fn send_tx(draft_path: &str) -> CommandNoun<NounSlab> {
         // Read and decode the draft file
         let draft_data = fs::read(draft_path)
             .map_err(|e| CrownError::Unknown(format!("Failed to read draft file: {}", e)))?;
@@ -696,7 +696,7 @@ impl Wallet {
             .cue_into(draft_data.as_bytes()?)
             .map_err(|e| CrownError::Unknown(format!("Failed to decode draft data: {}", e)))?;
 
-        Self::wallet("make-tx", &[draft_noun], Operation::Poke, &mut slab)
+        Self::wallet("send-tx", &[draft_noun], Operation::Poke, &mut slab)
     }
 
     /// Lists all public keys in the wallet.
@@ -769,14 +769,15 @@ async fn main() -> Result<(), NockAppError> {
     let mut wallet = Wallet::new(kernel);
 
     // Determine if this command requires chain synchronization
-    let requires_sync = match &cli.command {
-        // Commands that DON'T need sync
+
+    let requires_socket = match &cli.command {
+        // Commands that DON'T need socket either because they don't sync
+        // or they don't interact with the chain
         Commands::Keygen
         | Commands::DeriveChild { .. }
         | Commands::ImportKeys { .. }
         | Commands::ExportKeys
         | Commands::SignTx { .. }
-        | Commands::MakeTx { .. }
         | Commands::GenMasterPrivkey { .. }
         | Commands::GenMasterPubkey { .. }
         | Commands::ExportMasterPubkey
@@ -790,9 +791,8 @@ async fn main() -> Result<(), NockAppError> {
         // All other commands DO need sync
         _ => true,
     };
-
     // Check if we need sync but don't have a socket
-    if requires_sync && cli.nockchain_socket.is_none() {
+    if requires_socket && cli.nockchain_socket.is_none() {
         return Err(CrownError::Unknown(
             "This command requires connection to a nockchain node. Please provide --nockchain-socket"
             .to_string()
@@ -849,7 +849,7 @@ async fn main() -> Result<(), NockAppError> {
             gifts,
             fee,
         } => Wallet::simple_spend(names.clone(), recipients.clone(), gifts.clone(), *fee),
-        Commands::MakeTx { draft } => Wallet::make_tx(draft),
+        Commands::SendTx { draft } => Wallet::send_tx(draft),
         Commands::UpdateBalance => Wallet::update_balance(),
         Commands::ExportMasterPubkey => Wallet::export_master_pubkey(),
         Commands::ImportMasterPubkey { key_path } => Wallet::import_master_pubkey(key_path),
@@ -860,7 +860,7 @@ async fn main() -> Result<(), NockAppError> {
     }?;
 
     // If this command requires sync and we have a socket, wrap it with sync-run
-    let final_poke = if requires_sync && cli.nockchain_socket.is_some() {
+    let final_poke = if requires_socket && cli.nockchain_socket.is_some() {
         Wallet::wrap_with_sync_run(poke.0, poke.1)?
     } else {
         poke
@@ -1316,8 +1316,8 @@ mod tests {
             option_env!("GIT_SHA").unwrap_or("unknown")
         ));
 
-        let (noun, op) = Wallet::make_tx(draft_path)?;
-        let wire = WalletWire::Command(Commands::MakeTx {
+        let (noun, op) = Wallet::send_tx(draft_path)?;
+        let wire = WalletWire::Command(Commands::SendTx {
             draft: draft_path.to_string(),
         })
         .to_wire();
