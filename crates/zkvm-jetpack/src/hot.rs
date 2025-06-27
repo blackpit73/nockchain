@@ -593,23 +593,84 @@ pub const BASE_POLY_JETS: &[HotEntry] = &[
     ),
 ];
 
-pub const ZTD_JETS: &[HotEntry] = &[(
-    &[
-        K_138,
-        Left(b"one"),
-        Left(b"two"),
-        Left(b"tri"),
-        Left(b"qua"),
-        Left(b"pen"),
-        Left(b"zeke"),
-        Left(b"ext-field"),
-        Left(b"misc-lib"),
-        Left(b"tip5-lib"),
-        Left(b"permutation"),
-    ],
-    1,
-    permutation_jet,
-)];
+pub const ZTD_JETS: &[HotEntry] = &[
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"tip5-lib"),
+            Left(b"permutation"),
+        ],
+        1,
+        permutation_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"montify"),
+        ],
+        1,
+        montify_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"montiply"),
+        ],
+        1,
+        montiply_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"mont-reduction"),
+        ],
+        1,
+        mont_reduction_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"tip5-lib"),
+            Left(b"hash-varlen"),
+        ],
+        1,
+        hash_varlen_jet,
+    ),
+];
 
 pub const KEYGEN_JETS: &[HotEntry] = &[(
     &[
