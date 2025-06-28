@@ -936,6 +936,7 @@
           ?-  version
             %0  [%mine %0 commit next-nonce.m.k pow-len:t]~
             %1  [%mine %1 commit next-nonce.m.k pow-len:t]~
+            %2  [%mine %2 commit next-nonce.m.k pow-len:t]~
           ==
         ?:  %+  check-target:mine  dig.command
             (~(got z-by targets.c.k) parent.candidate-block.m.k)
@@ -1094,6 +1095,7 @@
           ?-  proof-version
             %0  [%0 commit nonce pow-len:t]
             %1  [%1 commit nonce pow-len:t]
+            %2  [%2 commit nonce pow-len:t]
           ==
         =.  next-nonce.m.k  nonce
         ~&  mining-on+nonce

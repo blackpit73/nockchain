@@ -1,15 +1,14 @@
 // Utility functions and commonly used re-exports
 use nockvm::interpreter::Context;
-use nockvm::noun::{Atom, IndirectAtom, DIRECT_MAX, Noun, D, T};
-use nockvm::mem::NockStack;
 use nockvm::jets::JetErr;
+use nockvm::mem::NockStack;
+use nockvm::noun::{Atom, IndirectAtom, Noun, D, DIRECT_MAX, T};
 
-use crate::form::{Belt};
+use crate::form::Belt;
 
-pub use tracing::{debug, trace};
 use bitvec::prelude::{BitSlice, Lsb0};
 use ibig::UBig;
-
+pub use tracing::{debug, trace};
 
 // tests whether a felt atom has the leading 1. we cannot actually test
 // Felt, because it doesn't include the leading 1.
@@ -17,7 +16,6 @@ pub fn felt_atom_is_valid(felt_atom: IndirectAtom) -> bool {
     let dat_ptr = felt_atom.data_pointer();
     unsafe { *(dat_ptr.add(3)) == 0x1 }
 }
-
 
 pub fn vec_to_hoon_list(context: &mut Context, vec: &[u64]) -> Noun {
     let mut list = D(0);

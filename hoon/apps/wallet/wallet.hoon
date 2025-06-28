@@ -178,7 +178,7 @@
       [%show-master-privkey ~]
       [%show =path]
       [%gen-master-privkey seedphrase=@t]
-      [%gen-master-pubkey master-privkey=keyc:slip10]
+      [%gen-master-pubkey privkey-b58=@t cc-b58=@t]
       [%update-balance ~]
       [%update-block ~]
       [%sync-run wrapped=cause]                         ::  run command after sync completes
@@ -1416,7 +1416,12 @@
   ++  do-gen-master-pubkey
     |=  =cause
     ?>  ?=(%gen-master-pubkey -.cause)
-    =/  cor  (from-private:s10 master-privkey.cause)
+    =/  privkey-atom=@
+      (de:base58:wrap (trip privkey-b58.cause))
+    =/  chain-code-atom=@
+      (de:base58:wrap (trip cc-b58.cause))
+    =/  =keyc:slip10  [privkey-atom chain-code-atom]
+    =/  cor  (from-private:s10 keyc)
     =/  master-pubkey-coil=coil  [%coil [%pub public-key] chain-code]:cor
     =/  master-privkey-coil=coil  [%coil [%prv private-key] chain-code]:cor
     %-  (debug "Generated master public key: {<public-key:cor>}")

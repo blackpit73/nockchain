@@ -1,18 +1,18 @@
+use bitvec::prelude::{BitSlice, Lsb0};
+use bitvec::view::BitView;
 use nockvm::interpreter::Context;
 use nockvm::jets::list::util::lent;
 use nockvm::jets::util::slot;
 use nockvm::jets::JetErr;
-use nockvm::noun::{Noun};
+use nockvm::noun::Noun;
 
 use crate::based;
 use crate::form::math::tip5::*;
 use crate::form::{Belt, Poly};
 use crate::jets::utils::jet_err;
-
-use bitvec::prelude::{BitSlice, Lsb0};
-use bitvec::view::BitView;
-
-use crate::utils::{belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, vec_to_hoon_list};
+use crate::utils::{
+    belt_as_noun, bitslice_to_u128, fits_in_u128, hoon_list_to_vecbelt, vec_to_hoon_list,
+};
 
 pub fn hoon_list_to_sponge(list: Noun) -> Result<[u64; STATE_SIZE], JetErr> {
     if list.is_atom() {
@@ -37,7 +37,6 @@ pub fn hoon_list_to_sponge(list: Noun) -> Result<[u64; STATE_SIZE], JetErr> {
     Ok(sponge)
 }
 
-
 pub fn permutation_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let sample = slot(subject, 6)?;
     let mut sponge = hoon_list_to_sponge(sample)?;
@@ -54,7 +53,7 @@ pub fn hash_varlen_jet(context: &mut Context, subject: Noun) -> Result<Noun, Jet
     let mut sponge = [0u64; STATE_SIZE];
 
     // assert that input is made of base field elements
-    input_vec.iter().for_each(|b| {based!(b.0)});
+    input_vec.iter().for_each(|b| based!(b.0));
 
     // pad input with ~[1 0 ... 0] to be a multiple of rate
     let lent_input = lent(input)?;
@@ -71,15 +70,17 @@ pub fn hash_varlen_jet(context: &mut Context, subject: Noun) -> Result<Noun, Jet
     }
 
     // process input in batches of size RATE
-    let mut cnt_q=q;
+    let mut cnt_q = q;
     let mut input_to_absorb = input_montiplied.as_slice();
     loop {
         let (scag_input, slag_input) = input_to_absorb.split_at(RATE);
         absorb_rate(&mut sponge, scag_input);
 
-        if cnt_q==0 { break; }
-        cnt_q=cnt_q-1;
-        input_to_absorb =  slag_input;
+        if cnt_q == 0 {
+            break;
+        }
+        cnt_q = cnt_q - 1;
+        input_to_absorb = slag_input;
     }
 
     // calc digest
@@ -91,7 +92,7 @@ pub fn hash_varlen_jet(context: &mut Context, subject: Noun) -> Result<Noun, Jet
     Ok(vec_to_hoon_list(context, &digest))
 }
 
-fn absorb_rate(sponge: &mut[u64; 16], input: &[Belt]) {
+fn absorb_rate(sponge: &mut [u64; 16], input: &[Belt]) {
     assert_eq!(input.len(), RATE);
 
     for copy_pos in 0..RATE {
@@ -100,8 +101,6 @@ fn absorb_rate(sponge: &mut[u64; 16], input: &[Belt]) {
 
     permute(sponge);
 }
-
-
 
 pub fn montify_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let stack = &mut context.stack;
@@ -129,7 +128,7 @@ fn montiply(a: Belt, b: Belt) -> Belt {
     // computes a*b = (abr^{-1} mod p)
     based!(a.0);
     based!(b.0);
-    mont_reduction( (a.0 as u128) * (b.0 as u128))
+    mont_reduction((a.0 as u128) * (b.0 as u128))
 }
 
 pub fn mont_reduction_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
@@ -169,7 +168,7 @@ fn mont_reduction(x: u128) -> Belt {
     ];
     let x_bitslice: &BitSlice<u64, Lsb0> = parts.view_bits::<Lsb0>();
     let x_u128 = bitslice_to_u128(x_bitslice);
-    
+
     let x1_u128_div = x_u128 / R_MOD_P1;
     let x1_u128 = x1_u128_div % R_MOD_P1;
     let x2_u128 = x_u128 / RX;
@@ -189,10 +188,11 @@ fn mont_reduction(x: u128) -> Belt {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::utils::u128_as_noun;
     use nockvm::jets::util::test::*;
     use nockvm::noun::{D, T};
+
+    use super::*;
+    use crate::utils::u128_as_noun;
 
     #[test]
     fn test_mont_reduction_jet() {
@@ -259,23 +259,50 @@ mod tests {
         // [%test-hash-varlen-tv ~]
         let b11048995573592393898 = belt_as_noun(&mut c.stack, Belt(11048995573592393898));
         let sam = D(0);
-        let res = T( &mut c.stack,&[ b11048995573592393898, D(6655187932135147625),
-            D(8573492257662932655), D(4379820112787053727), D(3881663824627898703), D(0) ]);
+        let res = T(
+            &mut c.stack,
+            &[
+                b11048995573592393898,
+                D(6655187932135147625),
+                D(8573492257662932655),
+                D(4379820112787053727),
+                D(3881663824627898703),
+                D(0),
+            ],
+        );
         assert_jet(c, hash_varlen_jet, sam, res);
 
         // [%test-hash-varlen-tv [i=2 t=~]]
         let b12061287490523852513 = belt_as_noun(&mut c.stack, Belt(12061287490523852513));
         let sam = T(&mut c.stack, &[D(2), D(0)]);
-        let res = T(&mut c.stack, &[ D(8342164316692288712), b12061287490523852513,
-            D(4038969618836824144), D(5830796451787599265), D(468390350313364562), D(0) ]);
+        let res = T(
+            &mut c.stack,
+            &[
+                D(8342164316692288712),
+                b12061287490523852513,
+                D(4038969618836824144),
+                D(5830796451787599265),
+                D(468390350313364562),
+                D(0),
+            ],
+        );
         assert_jet(c, hash_varlen_jet, sam, res);
 
         // [%test-hash-varlen-tv [i=5 t=[i=26 t=~]]]
         let b13674194094340317530 = belt_as_noun(&mut c.stack, Belt(13674194094340317530));
         let b13743008867885290460 = belt_as_noun(&mut c.stack, Belt(13743008867885290460));
         let sam = T(&mut c.stack, &[D(5), D(26), D(0)]);
-        let res = T( &mut c.stack, &[ D(4045697570544439560), b13674194094340317530,
-            b13743008867885290460, D(6020910684025273897), D(3362765570390427021), D(0) ]);
+        let res = T(
+            &mut c.stack,
+            &[
+                D(4045697570544439560),
+                b13674194094340317530,
+                b13743008867885290460,
+                D(6020910684025273897),
+                D(3362765570390427021),
+                D(0),
+            ],
+        );
         assert_jet(c, hash_varlen_jet, sam, res);
 
         let c = &mut init_context();
@@ -286,10 +313,33 @@ mod tests {
         let b12811986333282368874 = belt_as_noun(&mut c.stack, Belt(12811986333282368874));
         let b13601598673786067780 = belt_as_noun(&mut c.stack, Belt(13601598673786067780));
         let b11490077061305916457 = belt_as_noun(&mut c.stack, Belt(11490077061305916457));
-        let sam = T( &mut c.stack, &[ D(1), D(2448), D(1), D(0),
-            D(0), D(0), D(0), D(0), D(0), D(0), D(0) ] );
-        let res = T( &mut c.stack, &[ b12811986333282368874, b13601598673786067780,
-            D(3807788325936413287), D(5511165615113400862), b11490077061305916457, D(0) ] );
+        let sam = T(
+            &mut c.stack,
+            &[
+                D(1),
+                D(2448),
+                D(1),
+                D(0),
+                D(0),
+                D(0),
+                D(0),
+                D(0),
+                D(0),
+                D(0),
+                D(0),
+            ],
+        );
+        let res = T(
+            &mut c.stack,
+            &[
+                b12811986333282368874,
+                b13601598673786067780,
+                D(3807788325936413287),
+                D(5511165615113400862),
+                b11490077061305916457,
+                D(0),
+            ],
+        );
         assert_jet(c, hash_varlen_jet, sam, res);
     }
 }
