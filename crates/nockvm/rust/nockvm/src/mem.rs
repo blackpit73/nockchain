@@ -2013,6 +2013,12 @@ pub trait Preserve {
     unsafe fn assert_in_stack(&self, stack: &NockStack);
 }
 
+impl Preserve for () {
+    unsafe fn preserve(&mut self, _stack: &mut NockStack) {}
+
+    unsafe fn assert_in_stack(&self, _stack: &NockStack) {}
+}
+
 impl Preserve for IndirectAtom {
     unsafe fn preserve(&mut self, stack: &mut NockStack) {
         let size = indirect_raw_size(*self);

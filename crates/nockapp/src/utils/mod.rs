@@ -23,6 +23,8 @@ use std::sync::atomic::AtomicIsize;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::noun::slab::NounSlab;
+
 // urbit @da timestamp
 pub struct DA(pub u128);
 
@@ -151,10 +153,20 @@ pub fn create_context(
     hot_state: &[HotEntry],
     mut cold: Cold,
     trace_info: Option<TraceInfo>,
+    test_jets: Vec<NounSlab>,
 ) -> Context {
     let cache = Hamt::<Noun>::new(&mut stack);
+    let test_jets = {
+        let mut hamt = Hamt::<()>::new(&mut stack);
+        for jet in test_jets {
+            let mut path_noun = jet.copy_to_stack(&mut stack);
+            hamt = hamt.insert(&mut stack, &mut path_noun, ());
+        }
+
+        hamt
+    };
     let hot = Hot::init(&mut stack, hot_state);
-    let warm = Warm::init(&mut stack, &mut cold, &hot);
+    let warm = Warm::init(&mut stack, &mut cold, &hot, &test_jets);
     let slogger = Box::pin(CrownSlogger {});
     let cancel = Arc::new(AtomicIsize::new(NockCancelToken::RUNNING_IDLE));
 
@@ -167,6 +179,7 @@ pub fn create_context(
         cache,
         scry_stack: D(0),
         trace_info,
+        test_jets,
         running_status: cancel,
     }
 }

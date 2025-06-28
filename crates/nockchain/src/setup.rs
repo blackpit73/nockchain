@@ -65,7 +65,12 @@ pub async fn poke<J: Jammer + Send + 'static>(
             let set_genesis_seal = Atom::from_bytes(&mut poke_slab, &tag).as_noun();
             let poke_noun = T(
                 &mut poke_slab,
-                &[D(tas!(b"command")), set_genesis_seal, block_height_noun, seal_noun],
+                &[
+                    D(tas!(b"command")),
+                    set_genesis_seal,
+                    block_height_noun,
+                    seal_noun,
+                ],
             );
             poke_slab.set_root(poke_noun);
             poke_slab
@@ -255,10 +260,19 @@ impl IntoSlab for BlockchainConstants {
         let constants = T(
             &mut slab,
             &[
-                max_block_size, blocks_per_epoch, target_epoch_duration,
-                update_candidate_timestamp_interval, max_future_timestamp, min_past_blocks,
-                genesis_target_atom, max_target_atom, check_pow_flag, coinbase_timelock_min,
-                pow_len, max_coinbase_split, first_month_coinbase_min,
+                max_block_size,
+                blocks_per_epoch,
+                target_epoch_duration,
+                update_candidate_timestamp_interval,
+                max_future_timestamp,
+                min_past_blocks,
+                genesis_target_atom,
+                max_target_atom,
+                check_pow_flag,
+                coinbase_timelock_min,
+                pow_len,
+                max_coinbase_split,
+                first_month_coinbase_min,
             ],
         );
         slab.set_root(constants);

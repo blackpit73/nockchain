@@ -165,11 +165,14 @@ pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
         .await
         .expect("Failed to create temporary directory");
     let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
+    let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
+    let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
     // Spawns a new std::thread for this mining attempt
-    let kernel =
-        Kernel::<SaveableCheckpoint>::load_with_hot_state_huge(KERNEL, None, &hot_state, false)
-            .await
-            .expect("Could not load mining kernel");
+    let kernel = Kernel::<SaveableCheckpoint>::load_with_hot_state_huge(
+        KERNEL, None, &hot_state, test_jets, false,
+    )
+    .await
+    .expect("Could not load mining kernel");
     let effects_slab = kernel
         .poke(MiningWire::Candidate.to_wire(), candidate)
         .await
@@ -200,7 +203,11 @@ async fn set_mining_key(
         Atom::from_value(&mut set_mining_key_slab, pubkey).expect("Failed to create pubkey atom");
     let set_mining_key_poke = T(
         &mut set_mining_key_slab,
-        &[D(tas!(b"command")), set_mining_key.as_noun(), pubkey_cord.as_noun()],
+        &[
+            D(tas!(b"command")),
+            set_mining_key.as_noun(),
+            pubkey_cord.as_noun(),
+        ],
     );
     set_mining_key_slab.set_root(set_mining_key_poke);
 
@@ -239,7 +246,11 @@ async fn set_mining_key_advanced(
 
     let set_mining_key_poke = T(
         &mut set_mining_key_slab,
-        &[D(tas!(b"command")), set_mining_key_adv.as_noun(), configs_list],
+        &[
+            D(tas!(b"command")),
+            set_mining_key_adv.as_noun(),
+            configs_list,
+        ],
     );
     set_mining_key_slab.set_root(set_mining_key_poke);
 
@@ -256,7 +267,11 @@ async fn enable_mining(handle: &NockAppHandle, enable: bool) -> Result<PokeResul
         .expect("Failed to create enable-mining atom");
     let enable_mining_poke = T(
         &mut enable_mining_slab,
-        &[D(tas!(b"command")), enable_mining.as_noun(), if enable { YES } else { NO }],
+        &[
+            D(tas!(b"command")),
+            enable_mining.as_noun(),
+            if enable { YES } else { NO },
+        ],
     );
     enable_mining_slab.set_root(enable_mining_poke);
     handle

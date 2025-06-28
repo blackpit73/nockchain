@@ -296,6 +296,7 @@ pub struct Context {
     pub scry_stack: Noun,
     pub trace_info: Option<TraceInfo>,
     pub running_status: Arc<AtomicIsize>,
+    pub test_jets: Hamt<()>,
 }
 
 #[derive(Debug, Clone)]
@@ -381,6 +382,7 @@ pub enum Mote {
     Fail = tas!(b"fail") as isize,
     Intr = tas!(b"intr") as isize,
     Meme = tas!(b"meme") as isize,
+    Jest = tas!(b"jest") as isize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -428,6 +430,7 @@ pub type Result = result::Result<Noun, Error>;
 const BAIL_EXIT: Result = Err(Error::Deterministic(Mote::Exit, D(0)));
 const BAIL_FAIL: Result = Err(Error::NonDeterministic(Mote::Fail, D(0)));
 const BAIL_INTR: Result = Err(Error::NonDeterministic(Mote::Intr, D(0)));
+pub(crate) const BAIL_JEST: Result = Err(Error::NonDeterministic(Mote::Jest, D(0)));
 
 #[allow(unused_variables)]
 #[inline(always)]
@@ -741,12 +744,23 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                         Todo9::ComputeResult => {
                             if let Ok(mut formula) = res.slot_atom(kale.axis) {
                                 if !cfg!(feature = "sham_hints") {
-                                    if let Some((jet, _path)) = context
+                                    if let Some((jet, _path, test)) = context
                                         .warm
                                         .find_jet(&mut context.stack, &mut res, &mut formula)
+                                        .next()
                                     {
                                         match jet(context, res) {
-                                            Ok(jet_res) => {
+                                            Ok(mut jet_res) => {
+                                                if test {
+                                                    let mut test_res =
+                                                        interpret(context, res, formula)?;
+                                                    if !unifying_equality(
+                                                        &mut context.stack, &mut test_res,
+                                                        &mut jet_res,
+                                                    ) {
+                                                        break BAIL_JEST;
+                                                    }
+                                                }
                                                 res = jet_res;
                                                 context.stack.pop::<NockWork>();
                                                 continue;
@@ -1700,7 +1714,9 @@ mod hint {
                         };
 
                         match cold_res {
-                            Ok(true) => context.warm = Warm::init(stack, cold, hot),
+                            Ok(true) => {
+                                context.warm = Warm::init(stack, cold, hot, &context.test_jets)
+                            }
                             Err(cold::Error::NoParent) => {
                                 flog!(context, "serf: cold: register: could not match parent battery at given axis: {:?} {:?}", chum, parent_formula_ax);
                             }
