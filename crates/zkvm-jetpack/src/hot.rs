@@ -297,9 +297,6 @@ pub const EXTENSION_FIELD_JETS: &[HotEntry] = &[
         1,
         snag_as_bpoly_jet,
     ),
-];
-
-pub const EXTENSION_FIELD_JETS: &[HotEntry] = &[
     (
         &[
             K_138,

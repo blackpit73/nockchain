@@ -1,16 +1,14 @@
 use nockvm::interpreter::Context;
 use nockvm::jets::util::{bite_to_word, chop, slot};
 use nockvm::jets::JetErr;
-use nockvm::noun::{IndirectAtom, Noun, D, NO, T, YES};
-use tracing::debug;
+use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
 use nockvm::jets::list::util::{lent, reap};
-use crate::form::Belt;
-use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
 use nockvm::jets::bits::util::lsh;
 use nockvm::jets::math::util::add;
 use nockvm::mem::NockStack;
 use tracing::{debug,error};
 
+use crate::form::Belt;
 use crate::form::mary::*;
 use crate::form::math::mary::*;
 use crate::hand::handle::{finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice};
@@ -112,7 +110,7 @@ pub fn lift_elt_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr
 
         let count = init_bpoly_arg_list.count();
         let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(count));
-        init_bpoly(init_bpoly_arg_list, res_poly);
+        init_bpoly(init_bpoly_arg_list, res_poly)?;
 
         let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
         Ok(res_cell.as_cell()?.tail())
@@ -128,8 +126,7 @@ pub fn fet_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let v = rip_correct(stack, 6, 1, a)?;
 
     let lent_v = lent(v)? as u64;
-
-    if ((lent_v==1) && (step == 1)) || (lent_v==(step+1)) && levy_based(v) {
+    if (((lent_v==1) && (step == 1)) || (lent_v==(step+1))) && levy_based(v) {
         Ok(YES)
     } else {
         Ok(NO)

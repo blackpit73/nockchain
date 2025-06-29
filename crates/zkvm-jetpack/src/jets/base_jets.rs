@@ -127,20 +127,25 @@ pub fn levy_based(a_noun: Noun) -> bool {
             return true;
         }
         let cell = list.as_cell().expect("cell not found");
-        let based_res = based_one(cell.head());
+        let based_res = based(cell.head());
         if !based_res { return false; }
 
         list = cell.tail();
     }
 }
 
-pub fn based_one_jet(context: &mut Context, subject: Noun) -> Result {
+pub fn based_jet(_context: &mut Context, subject: Noun) -> Result {
     let sam = slot(subject, 6)?;
-    if based_one(sam) { Ok(YES) } else { Ok(NO) }
+    if based(sam) { Ok(YES) } else { Ok(NO) }
 }
 
-fn based_one(a_noun: Noun) -> bool {
-    let a = a_noun.as_atom().expect("a not atom");
-    let a_u64 = a.as_u64().expect("a not u64");
+fn based(a_noun: Noun) -> bool {
+    let Ok(a_atom) = a_noun.as_atom() else {
+        return false; // no atom
+    };
+    let Ok(a_u64) = a_atom.as_u64() else {
+        return false; // no u64
+    };
+
     a_u64 < PRIME
 }
